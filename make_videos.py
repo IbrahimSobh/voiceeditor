@@ -21,7 +21,7 @@ import soundfile as sf
 from matplotlib import font_manager
 from PIL import Image, ImageDraw, ImageFont
 
-from make_examples import AUDIO, EXAMPLES, ROOT
+from make_examples import AUDIO, EXAMPLES, ROOT, before_name
 from voiceeditor import plots
 from voiceeditor.analysis import formant_ceiling, formant_tracks, world_analyze
 from voiceeditor.audio_io import WORK_FS
@@ -46,8 +46,7 @@ def panel(x: np.ndarray, fs: int, x_max: float, formant_factor: float, ceiling: 
 
 
 def make_video(ex) -> Path:
-    before_name = ex.before or f"original_{ex.sample.split('_')[1]}"
-    xb, fs = sf.read(AUDIO / f"{before_name}.wav")
+    xb, fs = sf.read(AUDIO / f"{before_name(ex)}.wav")
     xa, _ = sf.read(AUDIO / f"{ex.name}.wav")
     assert fs == WORK_FS
     x_max = max(xb.size, xa.size) / fs
@@ -105,8 +104,13 @@ def make_video(ex) -> Path:
 
 
 def main() -> None:
+    """All videos, or only the examples named on the command line."""
+    import sys
     VIDEO.mkdir(parents=True, exist_ok=True)
+    wanted = set(sys.argv[1:])
     for ex in EXAMPLES:
+        if wanted and ex.name not in wanted:
+            continue
         out = make_video(ex)
         print(f"wrote {out.name} ({out.stat().st_size / 1e6:.2f} MB)")
 

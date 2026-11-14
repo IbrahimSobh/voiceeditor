@@ -33,7 +33,23 @@ class Example:
     before: str = ""          # file the "before" player uses; default: the original sample
 
 
+ORIGINALS = {  # sample file -> name of its copy in docs/audio
+    "sample_male_ar.wav": "original_male_ar",
+    "sample_male_en.wav": "original_male",
+    "sample_female_en.wav": "original_female",
+}
+
+
+def before_name(ex: Example) -> str:
+    return ex.before or ORIGINALS[ex.sample]
+
+
 EXAMPLES = [
+    Example("ar_male_to_female", "sample_male_ar.wav", PRESETS["More female"],
+            title="Arabic: male → female (More female: F0 ×1.6, range ×1.1, formants ×1.17)"),
+    Example("ar_sad", "sample_male_ar.wav", PRESETS["Sad"], title="Arabic: sad (lower, flatter pitch, 18 % slower)"),
+    Example("ar_happy", "sample_male_ar.wav", PRESETS["Happy"],
+            title="Arabic: happy (higher, livelier pitch, 12 % faster)"),
     Example("male_to_female", "sample_male_en.wav", PRESETS["More female"],
             title="Male → female (More female: F0 ×1.6, range ×1.1, formants ×1.17)"),
     Example("female_to_male", "sample_female_en.wav", PRESETS["More male"],
@@ -55,7 +71,7 @@ EXAMPLES = [
             remove=RemoveNoise(True, "Wiener filter", strength=1.5), title="Remove the hum: Wiener filter, strength ×1.5",
             before="hum_50Hz_10dB"),
 ]
-IMAGES = {"male_to_female", "denoised_wiener"}     # before/after spectrogram pictures for these
+IMAGES = {"ar_male_to_female", "male_to_female", "denoised_wiener"}     # before/after spectrogram pictures for these
 
 
 def process(x: np.ndarray, fs: int, ex: Example):
@@ -84,10 +100,10 @@ def main() -> None:
     AUDIO.mkdir(parents=True, exist_ok=True)
     IMG.mkdir(parents=True, exist_ok=True)
     originals = {}
-    for name in ("sample_male_en.wav", "sample_female_en.wav"):
+    for name, copy in ORIGINALS.items():
         x, fs = load_audio((ROOT / "samples" / name).read_bytes())
         originals[name] = (x, fs, world_analyze(x, fs).f0)
-        (AUDIO / f"original_{name.split('_')[1]}.wav").write_bytes(to_wav_bytes(x, fs))
+        (AUDIO / f"{copy}.wav").write_bytes(to_wav_bytes(x, fs))
     for ex in EXAMPLES:
         x, fs, f0_x = originals[ex.sample]
         y, f0_y = process(x, fs, ex)

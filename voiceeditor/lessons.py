@@ -514,6 +514,23 @@ sampled.
 
 
 def lesson_world():
+    st.info("""
+**What exactly is WORLD?** WORLD is a free, open-source **speech analysis and synthesis
+library**: a vocoder written in C++ by Masanori Morise (then at the University of Yamanashi,
+Japan), described in a 2016 journal paper. It is a set of signal-processing algorithms, not an AI model: it has no
+training data and no learned weights, and gives the same output for the same input every time.
+
+- **What it does:** takes a recording apart into three parameter tracks (pitch, spectral
+  envelope, aperiodicity), and puts a waveform back together from those tracks, edited or not.
+- **How this app uses it:** through **pyworld**, a Python wrapper around the C++ library
+  (`pip install pyworld`). `world_analyze` and `world_synthesize` in `voiceeditor/analysis.py`
+  call it.
+- **Where else it's used:** WORLD is a standard tool in speech research. It extracts the
+  acoustic features for statistical parametric speech synthesis (for example the Merlin
+  toolkit) and for voice-conversion research, and serves as a baseline in vocoder comparisons.
+- **What it isn't:** a neural vocoder (like WaveNet or HiFi-GAN, which learn to generate audio
+  from data), or a complete voice changer. It provides the parameters; the edits are ours.
+""", icon=":material/info:")
     st.markdown("""
 A **vocoder** (voice coder) analyzes speech into a few parameters and synthesizes speech back
 from them. **WORLD** (Morise, Yokomori and Ozawa, 2016) is a high-quality vocoder built purely
@@ -782,7 +799,7 @@ digraph {
 | **NumPy** | arrays and maths in Python | every computation on samples and frames |
 | **SciPy** | scientific algorithms | resampling, STFT and inverse STFT, spectrograms, filters |
 | **soundfile** | reads and writes audio files (libsndfile) | WAV, FLAC, OGG, MP3 input; WAV export |
-| **pyworld** | Python wrapper for the WORLD vocoder (C++) | Harvest, CheapTrick, D4C, synthesis |
+| **pyworld** | Python wrapper for **WORLD**, a free C++ speech analysis/synthesis library (a signal-processing vocoder, no AI) by M. Morise | Harvest, CheapTrick, D4C, synthesis |
 | **parselmouth** | Python interface to **Praat**, the standard phonetics program | formant tracking (Burg LPC) |
 | **matplotlib** | plotting library | waveforms, spectrograms, lesson charts |
 | **Streamlit** | turns a Python script into a web page | the whole user interface |
@@ -849,7 +866,8 @@ def lesson_glossary():
         "Vocoder": "System that analyzes speech into parameters and synthesizes it back.",
         "Voiced / unvoiced": "With / without vocal-fold vibration.",
         "Wiener filter": "Noise-reduction gain ξ/(1+ξ) that minimises mean squared error.",
-        "WORLD": "Signal-processing vocoder: Harvest (F0), CheapTrick (envelope), D4C (aperiodicity).",
+        "WORLD": "Free C++ library by M. Morise (2016) that splits speech into F0 (Harvest), spectral envelope "
+                 "(CheapTrick) and aperiodicity (D4C), and rebuilds speech from them. Signal processing, no AI.",
     }
     st.dataframe([{"Term": k, "Meaning": v} for k, v in terms.items()], hide_index=True,
                  width="stretch", height=36 * (len(terms) + 1))
