@@ -112,33 +112,80 @@ emphatic consonants, tools and references, and a glossary.
 
 ## Listen: before and after
 
-All files were made by [make_examples.py](make_examples.py) with the same code as the
-app, from the two sample sentences.
+Each video plays the **before** sound (playhead on the left spectrogram), a short pause, then the
+**after** sound (playhead on the right). Press play; turn the sound on if the player starts muted.
+Below each video are the separate WAV files. All were made by [make_examples.py](make_examples.py)
+and [make_videos.py](make_videos.py) with the same code as the app, from the sample sentences.
 
 ### Voice edits
 
-| Processing | Before | After |
-|---|---|---|
-| Male → female (*More female*: F0 ×1.6, range ×1.1, formants ×1.17) | <audio controls src="docs/audio/original_male.wav"></audio><br>[original_male.wav](docs/audio/original_male.wav) | <audio controls src="docs/audio/male_to_female.wav"></audio><br>[male_to_female.wav](docs/audio/male_to_female.wav) |
-| Female → male (*More male*: F0 ×0.65, range ×0.9, formants ×0.88) | <audio controls src="docs/audio/original_female.wav"></audio><br>[original_female.wav](docs/audio/original_female.wav) | <audio controls src="docs/audio/female_to_male.wav"></audio><br>[female_to_male.wav](docs/audio/female_to_male.wav) |
-| *Happy*: higher, livelier pitch, 12 % faster | <audio controls src="docs/audio/original_female.wav"></audio><br>[original_female.wav](docs/audio/original_female.wav) | <audio controls src="docs/audio/happy.wav"></audio><br>[happy.wav](docs/audio/happy.wav) |
-| *Sad*: lower, flatter pitch, 18 % slower | <audio controls src="docs/audio/original_female.wav"></audio><br>[original_female.wav](docs/audio/original_female.wav) | <audio controls src="docs/audio/sad.wav"></audio><br>[sad.wav](docs/audio/sad.wav) |
-| Slower, speed ×0.75 (same pitch) | <audio controls src="docs/audio/original_male.wav"></audio><br>[original_male.wav](docs/audio/original_male.wav) | <audio controls src="docs/audio/slower_0.75x.wav"></audio><br>[slower_0.75x.wav](docs/audio/slower_0.75x.wav) |
-| Faster, speed ×1.5 (same pitch) | <audio controls src="docs/audio/original_male.wav"></audio><br>[original_male.wav](docs/audio/original_male.wav) | <audio controls src="docs/audio/faster_1.5x.wav"></audio><br>[faster_1.5x.wav](docs/audio/faster_1.5x.wav) |
+#### Male → female (More female: F0 ×1.6, range ×1.1, formants ×1.17)
 
-![Male → female: original (left) and edited (right). F0 (orange) and formants (green) both move up](docs/img/example_male_to_female.png)
+https://github.com/user-attachments/assets/946183b7-71a9-4330-b84e-293395c8f25c
+
+Before: <audio controls src="docs/audio/original_male.wav"></audio> [original_male.wav](docs/audio/original_male.wav) · After: <audio controls src="docs/audio/male_to_female.wav"></audio> [male_to_female.wav](docs/audio/male_to_female.wav)
+
+#### Female → male (More male: F0 ×0.65, range ×0.9, formants ×0.88)
+
+https://github.com/user-attachments/assets/ada8db01-467f-4bfa-b463-3139f259f220
+
+Before: <audio controls src="docs/audio/original_female.wav"></audio> [original_female.wav](docs/audio/original_female.wav) · After: <audio controls src="docs/audio/female_to_male.wav"></audio> [female_to_male.wav](docs/audio/female_to_male.wav)
+
+#### Happy: higher, livelier pitch, 12 % faster
+
+https://github.com/user-attachments/assets/3ac65e9b-a7b3-41c2-9513-8f1119fe5c6e
+
+Before: <audio controls src="docs/audio/original_female.wav"></audio> [original_female.wav](docs/audio/original_female.wav) · After: <audio controls src="docs/audio/happy.wav"></audio> [happy.wav](docs/audio/happy.wav)
+
+#### Sad: lower, flatter pitch, 18 % slower
+
+https://github.com/user-attachments/assets/5fe0f318-44d3-443f-8978-54070364f25b
+
+Before: <audio controls src="docs/audio/original_female.wav"></audio> [original_female.wav](docs/audio/original_female.wav) · After: <audio controls src="docs/audio/sad.wav"></audio> [sad.wav](docs/audio/sad.wav)
+
+#### Slower, speed ×0.75 (same pitch)
+
+https://github.com/user-attachments/assets/64a1e36f-1296-4786-9ba5-6242aeace9ba
+
+Before: <audio controls src="docs/audio/original_male.wav"></audio> [original_male.wav](docs/audio/original_male.wav) · After: <audio controls src="docs/audio/slower_0.75x.wav"></audio> [slower_0.75x.wav](docs/audio/slower_0.75x.wav)
+
+#### Faster, speed ×1.5 (same pitch)
+
+https://github.com/user-attachments/assets/7580a49b-e90d-445e-9081-db83e9b61fb2
+
+Before: <audio controls src="docs/audio/original_male.wav"></audio> [original_male.wav](docs/audio/original_male.wav) · After: <audio controls src="docs/audio/faster_1.5x.wav"></audio> [faster_1.5x.wav](docs/audio/faster_1.5x.wav)
 
 ### Noise
 
-| Processing | Before | After |
-|---|---|---|
-| Add white noise at 10 dB SNR | <audio controls src="docs/audio/original_male.wav"></audio><br>[original_male.wav](docs/audio/original_male.wav) | <audio controls src="docs/audio/noisy_white_10dB.wav"></audio><br>[noisy_white_10dB.wav](docs/audio/noisy_white_10dB.wav) |
-| Remove it: spectral subtraction | <audio controls src="docs/audio/noisy_white_10dB.wav"></audio><br>[noisy_white_10dB.wav](docs/audio/noisy_white_10dB.wav) | <audio controls src="docs/audio/denoised_spectral_subtraction.wav"></audio><br>[denoised_spectral_subtraction.wav](docs/audio/denoised_spectral_subtraction.wav) |
-| Remove it: Wiener filter | <audio controls src="docs/audio/noisy_white_10dB.wav"></audio><br>[noisy_white_10dB.wav](docs/audio/noisy_white_10dB.wav) | <audio controls src="docs/audio/denoised_wiener.wav"></audio><br>[denoised_wiener.wav](docs/audio/denoised_wiener.wav) |
-| Add 50 Hz mains hum at 10 dB SNR | <audio controls src="docs/audio/original_female.wav"></audio><br>[original_female.wav](docs/audio/original_female.wav) | <audio controls src="docs/audio/hum_50Hz_10dB.wav"></audio><br>[hum_50Hz_10dB.wav](docs/audio/hum_50Hz_10dB.wav) |
-| Remove the hum: Wiener filter, strength ×1.5 | <audio controls src="docs/audio/hum_50Hz_10dB.wav"></audio><br>[hum_50Hz_10dB.wav](docs/audio/hum_50Hz_10dB.wav) | <audio controls src="docs/audio/hum_removed_wiener.wav"></audio><br>[hum_removed_wiener.wav](docs/audio/hum_removed_wiener.wav) |
+#### Add white noise at 10 dB SNR
 
-![Noisy input (left) and Wiener-filtered result (right)](docs/img/example_denoised_wiener.png)
+https://github.com/user-attachments/assets/6308e847-05eb-4072-9632-62196c8abea0
+
+Before: <audio controls src="docs/audio/original_male.wav"></audio> [original_male.wav](docs/audio/original_male.wav) · After: <audio controls src="docs/audio/noisy_white_10dB.wav"></audio> [noisy_white_10dB.wav](docs/audio/noisy_white_10dB.wav)
+
+#### Remove it: spectral subtraction
+
+https://github.com/user-attachments/assets/94d99712-c62f-40f9-bbbd-639a7c9a44b2
+
+Before: <audio controls src="docs/audio/noisy_white_10dB.wav"></audio> [noisy_white_10dB.wav](docs/audio/noisy_white_10dB.wav) · After: <audio controls src="docs/audio/denoised_spectral_subtraction.wav"></audio> [denoised_spectral_subtraction.wav](docs/audio/denoised_spectral_subtraction.wav)
+
+#### Remove it: Wiener filter
+
+https://github.com/user-attachments/assets/495a64fb-897c-4f1b-b896-9630f1cc4cf2
+
+Before: <audio controls src="docs/audio/noisy_white_10dB.wav"></audio> [noisy_white_10dB.wav](docs/audio/noisy_white_10dB.wav) · After: <audio controls src="docs/audio/denoised_wiener.wav"></audio> [denoised_wiener.wav](docs/audio/denoised_wiener.wav)
+
+#### Add 50 Hz mains hum at 10 dB SNR
+
+https://github.com/user-attachments/assets/57cd0e04-64a5-457d-9678-4f942c9a3053
+
+Before: <audio controls src="docs/audio/original_female.wav"></audio> [original_female.wav](docs/audio/original_female.wav) · After: <audio controls src="docs/audio/hum_50Hz_10dB.wav"></audio> [hum_50Hz_10dB.wav](docs/audio/hum_50Hz_10dB.wav)
+
+#### Remove the hum: Wiener filter, strength ×1.5
+
+https://github.com/user-attachments/assets/12cf2f87-4ca0-4f51-93ef-9114ab75ad87
+
+Before: <audio controls src="docs/audio/hum_50Hz_10dB.wav"></audio> [hum_50Hz_10dB.wav](docs/audio/hum_50Hz_10dB.wav) · After: <audio controls src="docs/audio/hum_removed_wiener.wav"></audio> [hum_removed_wiener.wav](docs/audio/hum_removed_wiener.wav)
 
 Listen for the trade-off: spectral subtraction removes more noise but leaves faint
 "musical noise" (random beeps); the Wiener filter sounds smoother but keeps a little more
@@ -168,7 +215,10 @@ formant shift, duration, SNR accuracy, noise removal, click-to-data accuracy).
 .venv\Scripts\python make_examples.py
 ```
 
-Rebuilds `docs/audio` and the example spectrogram pictures.
+Rebuilds `docs/audio` and the example spectrogram pictures. Then `make_videos.py` rebuilds `docs/video`
+(it needs ffmpeg: `.venv\Scripts\python -m pip install imageio-ffmpeg`);
+GitHub only plays videos uploaded through its web editor, so new videos must be re-uploaded
+(drag them into any comment box on GitHub, copy the `user-attachments` links into this README).
 
 ```
 .venv\Scripts\streamlit run app.py --server.port 8503
