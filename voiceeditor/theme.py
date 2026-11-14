@@ -19,6 +19,7 @@ ACCENT = "#22c7f0"      # cyan
 ACCENT_2 = "#8b6cff"    # violet
 
 PANEL_COLORS = {"original": "#3b9eff", "noisy": "#ff9f2e", "after": "#2ee6a6"}
+METHOD_COLORS = {"Spectral subtraction": ACCENT_2, "Wiener filter": "#ff5c8a"}   # quality-metric charts
 F0_COLOR = "#ff8c1a"
 FORMANT_COLOR = "#38e0c0"
 ENVELOPE_COLOR = "#f2f5ff"

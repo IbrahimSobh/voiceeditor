@@ -10,11 +10,11 @@ import numpy as np
 from voiceeditor.analysis import (
     formant_ceiling, formant_tracks, summary, world_analyze, world_synthesize,
 )
-from voiceeditor import plots
+from voiceeditor import metrics, plots
 from voiceeditor.audio_io import load_audio
 from voiceeditor.edits import PRESETS, EditSettings, apply_edits
 from voiceeditor.noise import (
-    NOISE_TYPES, REMOVE_METHODS, AddNoise, RemoveNoise, add_noise, make_noise, remove_noise, speech_power,
+    NOISE_TYPES, REMOVE_METHODS, AddNoise, RemoveNoise, add_noise, noise_parts, remove_noise, speech_power,
 )
 
 SAMPLE = Path(__file__).parent / "samples" / "sample_male_en.wav"
@@ -73,6 +73,41 @@ def main():
         good = after < 0.5 * before
         ok &= good
         print(f"remove ({method}): noise in pauses {before:.3f} -> {after:.3f} {'OK' if good else 'FAIL'}")
+
+    # "Noise alone" must be pure noise even when the mix is rescaled to avoid clipping (here at -5 dB SNR).
+    speech, noise = noise_parts(x, fs, AddNoise(True, "White", -5.0))
+    gain = speech[np.argmax(np.abs(x))] / x[np.argmax(np.abs(x))]
+    mix = add_noise(x, fs, AddNoise(True, "White", -5.0))
+    good = gain < 1 and np.allclose(speech, gain * x) and np.allclose(speech + noise, mix)
+    ok &= good
+    print(f"parts    : mix gain {gain:.2f}, speech + noise = mix, noise holds no speech {'OK' if good else 'FAIL'}")
+
+    # Metrics: known answers first, then each removal method must beat the noisy input.
+    half = 0.5 * x
+    good = (abs(metrics.snr(x, half) - 20 * np.log10(2)) < 0.01 and metrics.si_sdr(x, half) > 100
+            and metrics.log_spectral_distance(x, x, fs) < 1e-6 and abs(metrics.segmental_snr(x, x) - 35.0) < 1e-9)
+    ok &= good
+    print(f"metrics  : half volume SNR {metrics.snr(x, half):.2f} dB (6.02), "
+          f"SI-SDR {metrics.si_sdr(x, half):.0f} dB (perfect) "
+          f"{'OK' if good else 'FAIL'}")
+    short = x[16000:16160]                                   # 10 ms: shorter than one 32 ms frame
+    good = all(np.isfinite(v) for v in metrics.quality(short, short + 0.01, fs).values())
+    ok &= good
+    print(f"metrics  : a 10 ms clip gives finite numbers {'OK' if good else 'FAIL'}")
+    speech, noise = noise_parts(x, fs, AddNoise(True, "White", 10.0))
+    good = abs(metrics.snr(speech, speech + noise) - 10 * np.log10(np.sum(speech ** 2) / np.sum(noise ** 2))) < 0.01
+    ok &= good
+    print(f"metrics  : SNR of the noisy mix = speech/noise power over the whole signal {'OK' if good else 'FAIL'}")
+    q_noisy = metrics.quality(speech, speech + noise, fs)
+    for method in REMOVE_METHODS:
+        q = metrics.quality(speech, remove_noise(speech + noise, fs, RemoveNoise(True, method)), fs)
+        good = (q["snr"] > q_noisy["snr"] and q["seg_snr"] > q_noisy["seg_snr"] and q["si_sdr"] > q_noisy["si_sdr"]
+                and q["lsd"] < q_noisy["lsd"])
+        ok &= good
+        print(f"quality ({method}): SI-SDR {q_noisy['si_sdr']:.1f} -> {q['si_sdr']:.1f} dB, "
+              f"segSNR {q_noisy['seg_snr']:.1f} -> {q['seg_snr']:.1f} dB, "
+              f"LSD {q_noisy['lsd']:.1f} -> {q['lsd']:.1f} dB "
+              f"{'OK' if good else 'FAIL'}")
 
     # A click at a known (time, frequency) must map back to that time and frequency.
     ft = formant_tracks(x, fs, ceiling)

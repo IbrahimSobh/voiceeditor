@@ -85,14 +85,26 @@ def speech_power(x: np.ndarray, fs: int) -> float:
     return float(np.mean(frames[active] ** 2)) if active.any() else float(np.mean(x ** 2))
 
 
+def noise_parts(x: np.ndarray, fs: int, s: AddNoise) -> tuple[np.ndarray, np.ndarray]:
+    """The speech and the noise inside the noisy mix, so that speech + noise = add_noise(x, fs, s).
+
+    If the mix would clip, both are scaled down by the same gain. Keeping them apart gives the exact
+    clean reference for the quality metrics, and the true "Noise alone" (x itself isn't, after a rescale).
+    """
+    if not s.enabled:
+        return x, np.zeros_like(x)
+    noise = make_noise(s.kind, x.size, fs) * np.sqrt(speech_power(x, fs) / 10 ** (s.snr_db / 10))
+    peak = np.max(np.abs(x + noise))
+    gain = 0.95 / peak if peak > 1.0 else 1.0           # rescale only if it would clip
+    return x * gain, noise * gain
+
+
 def add_noise(x: np.ndarray, fs: int, s: AddNoise) -> np.ndarray:
     """Mix noise into x so that speech power / noise power = s.snr_db."""
     if not s.enabled:
         return x
-    noise = make_noise(s.kind, x.size, fs) * np.sqrt(speech_power(x, fs) / 10 ** (s.snr_db / 10))
-    y = x + noise
-    peak = np.max(np.abs(y))
-    return y / peak * 0.95 if peak > 1.0 else y        # rescale only if it would clip
+    speech, noise = noise_parts(x, fs, s)
+    return speech + noise
 
 
 # ---------- removing noise ----------

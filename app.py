@@ -12,6 +12,7 @@ Settings can also come from the web address, for demos and screenshots, e.g.
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -22,8 +23,11 @@ from voiceeditor import lessons, plots
 from voiceeditor.analysis import WorldParams, formant_ceiling, formant_tracks, summary, world_analyze, world_synthesize
 from voiceeditor.audio_io import load_audio, normalize, to_wav_bytes
 from voiceeditor.edits import PRESETS, EditSettings, apply_edits
-from voiceeditor.noise import NOISE_TYPES, REMOVE_METHODS, AddNoise, RemoveNoise, add_noise, remove_noise
-from voiceeditor.theme import PANEL_COLORS
+from voiceeditor.metrics import METRICS, SEG_MAX_DB, SEG_MIN_DB, quality, segmental_snr_track
+from voiceeditor.noise import (
+    NOISE_TYPES, NOVERLAP, NPERSEG, REMOVE_METHODS, AddNoise, RemoveNoise, noise_parts, remove_noise,
+)
+from voiceeditor.theme import METHOD_COLORS, PANEL_COLORS
 
 SAMPLES = Path(__file__).parent / "samples"
 SLIDERS = {  # key: (label, min, max, step)
@@ -75,9 +79,16 @@ def load(data: bytes):
 
 
 @st.cache_data(show_spinner=False)
-def noisy_signal(data: bytes, add_key: tuple):
+def noisy_parts(data: bytes, add_key: tuple):
+    """The clean speech and the noise inside the noisy mix (both scaled the same if the mix was rescaled)."""
     x, fs = load(data)
-    return add_noise(x, fs, AddNoise(*add_key))
+    return noise_parts(x, fs, AddNoise(*add_key))
+
+
+@st.cache_data(show_spinner=False)
+def noisy_signal(data: bytes, add_key: tuple):
+    speech, noise = noisy_parts(data, add_key)
+    return speech + noise
 
 
 @st.cache_data(show_spinner=False)
@@ -109,6 +120,20 @@ def render(data: bytes, add_key: tuple, remove_key: tuple, voice_key: tuple):
     edited = apply_edits(WorldParams(f0=f0, sp=sp, ap=ap, fs=fs), s)
     y = normalize(world_synthesize(edited), float(np.max(np.abs(x))) or 0.95)   # keep the input's peak level
     return y, edited.f0, edited.sp
+
+
+@st.cache_data(show_spinner=False)
+def quality_report(data: bytes, add_key: tuple, remove_key: tuple):
+    """Metrics and segmental-SNR tracks of the noisy input and of both removal methods, vs the clean speech.
+
+    Both methods use the same slider settings (strength, floor, noise estimate), whichever one is in use.
+    """
+    _, fs = load(data)
+    ref, _ = noisy_parts(data, add_key)
+    signals = {"noisy": noisy_signal(data, add_key)}
+    for m in REMOVE_METHODS:
+        signals[m] = cleaned_signal(data, add_key, replace(RemoveNoise(*remove_key), enabled=True, method=m).key())
+    return {name: (quality(ref, sig, fs), *segmental_snr_track(ref, sig)) for name, sig in signals.items()}
 
 
 def wav(sig: np.ndarray, fs: int) -> bytes:
@@ -278,7 +303,7 @@ with st.spinner("Processing…"):
         panels.append({"name": "noisy", "title": "With added noise",
                        "detail": f"{add_s.kind.lower()}, {add_s.snr_db:.0f} dB SNR",
                        "x": xn, "f0": f0_n, "sp": sp_n, "ft": formants(xn, fs, ceiling),
-                       "extras": [("Noise alone", xn - x)]})
+                       "extras": [("Noise alone", noisy_parts(data, add_s.key())[1])]})
     y, f0_a, sp_a = render(data, add_s.key(), rem_s.key(), voice.key())
     changes = [n for n, v in [("pitch", voice.pitch), ("range", voice.pitch_range),
                               ("formants", voice.formant), ("speed", voice.speed)] if v != 1.0]
@@ -413,6 +438,53 @@ for col, p in zip(cols, panels):
                 st.session_state.cursor = click
                 st.session_state.open_inspect = True
                 st.rerun()
+
+
+
+# ---------- quality metrics: every noise method, in numbers ----------
+
+SHORT = {"seg_snr": "Seg. SNR"}     # card labels must fit narrow columns
+
+
+def fmt_db(v: float) -> str:
+    return "–" if not np.isfinite(v) else "> 99" if v > 99 else f"{v:.1f}"
+
+
+section("Quality metrics · compared with the clean original")
+if not add_s.enabled:
+    st.caption("Metrics need the clean speech as a reference. Turn on **Add noise**: the app then knows exactly "
+               "what is speech and what is noise, and can score the noisy input and both removal methods. "
+               "See the lesson *Measuring quality* in Learn.")
+else:
+    report = quality_report(data, add_s.key(), rem_s.key())
+    shown = rem_s.method if rem_s.enabled else "noisy"
+    cards = st.columns(len(METRICS))
+    for col, (k, (label, unit, higher, help_text)) in zip(cards, METRICS.items()):
+        value, base = report[shown][0][k], report["noisy"][0][k]
+        delta = None if shown == "noisy" else f"{value - base:+.1f}"
+        col.metric(f"{SHORT.get(k, label)} ({unit}) {'↑' if higher else '↓'}", fmt_db(value), delta,
+                   delta_color="normal" if higher else "inverse", help=help_text, border=True)
+    st.caption(("After " + rem_s.method + " · small numbers: change from the noisy input"
+                if rem_s.enabled else "With added noise, before any removal")
+               + (" · measured before the voice edits: after WORLD rebuilds the voice, the waveform no longer "
+                  "lines up sample by sample with the original" if not voice.is_neutral() else ""))
+
+    names = {"noisy": "With added noise"} | {m: m for m in REMOVE_METHODS}
+    rows = []
+    for name, (q, _, _) in report.items():
+        row = {"Signal": names[name] + ("  ◀ in use" if rem_s.enabled and name == rem_s.method else "")}
+        row |= {f"{lab} ({u}) {'↑' if hi else '↓'}": fmt_db(q[k]) for k, (lab, u, hi, _) in METRICS.items()}
+        row["SI-SDR gain (dB)"] = "–" if name == "noisy" else f"{q['si_sdr'] - report['noisy'][0]['si_sdr']:+.1f}"
+        rows.append(row)
+    st.dataframe(rows, hide_index=True, width="stretch")
+    colors = {"noisy": PANEL_COLORS["noisy"]} | METHOD_COLORS
+    tracks = [{"label": names[n], "db": db, "speech": sp, "color": colors[n], "mean": q["seg_snr"]}
+              for n, (q, db, sp) in report.items()]
+    st.pyplot(plots.quality_track_figure(tracks, (NPERSEG - NOVERLAP) / fs, SEG_MIN_DB, SEG_MAX_DB))
+    st.caption("Frame-by-frame SNR over the speech (32 ms frames, clamped to −10…35 dB); its mean is the "
+               "segmental SNR. Both methods use the same Strength, floor and noise-estimate sliders. "
+               "↑ higher is better, ↓ lower is better. Numbers don't replace listening: musical noise can "
+               "score well and still sound bad.")
 
 if st.session_state.pop("open_inspect", False) and st.session_state.cursor is not None:
     inspect(st.session_state.cursor)

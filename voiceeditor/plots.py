@@ -187,3 +187,25 @@ def _new_figure(size) -> Figure:
 
 def close(fig) -> None:
     """Nothing to release: figures made without pyplot are freed like normal objects."""
+
+
+def quality_track_figure(tracks: list[dict], hop_s: float, lo: float, hi: float, size: tuple = (10, 2.4)):
+    """Segmental SNR over time, one line per signal; frames without speech are left out.
+
+    Each track: {"label", "db" (per frame), "speech" (bool mask), "color", optional "mean"}.
+    """
+    fig = _new_figure(size)
+    ax = fig.subplots()
+    for tr in tracks:
+        t = np.arange(tr["db"].size) * hop_s
+        ax.plot(t, np.where(tr["speech"], tr["db"], np.nan), color=tr["color"], linewidth=1.1,
+                label=tr["label"] + (f'  (mean {tr["mean"]:.1f} dB)' if tr.get("mean") is not None else ""))
+    ax.set_ylim(lo - 2, hi + 2)
+    ax.axhline(0, color=MUTED, linewidth=0.6, linestyle=":")
+    ax.set_xlabel("time (s)", fontsize=8)
+    ax.set_ylabel("frame SNR (dB)", fontsize=8)
+    ax.tick_params(labelsize=7)
+    ax.grid(alpha=0.3)
+    ax.legend(fontsize=7, loc="lower right", ncol=len(tracks))
+    fig.tight_layout()
+    return fig
