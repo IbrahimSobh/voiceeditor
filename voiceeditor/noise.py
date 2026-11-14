@@ -85,24 +85,34 @@ def speech_power(x: np.ndarray, fs: int) -> float:
     return float(np.mean(frames[active] ** 2)) if active.any() else float(np.mean(x ** 2))
 
 
+def noise_parts(x: np.ndarray, fs: int, s: AddNoise) -> tuple[np.ndarray, np.ndarray]:
+    """The speech and the noise inside the noisy mix, so that speech + noise = add_noise(x, fs, s).
+
+    If the mix would clip, both are scaled down by the same gain. Keeping them apart gives the exact
+    clean reference for the quality metrics, and the true "Noise alone" (x itself isn't, after a rescale).
+    """
+    if not s.enabled:
+        return x, np.zeros_like(x)
+    noise = make_noise(s.kind, x.size, fs) * np.sqrt(speech_power(x, fs) / 10 ** (s.snr_db / 10))
+    peak = np.max(np.abs(x + noise))
+    gain = 0.95 / peak if peak > 1.0 else 1.0           # rescale only if it would clip
+    return x * gain, noise * gain
+
+
 def add_noise(x: np.ndarray, fs: int, s: AddNoise) -> np.ndarray:
     """Mix noise into x so that speech power / noise power = s.snr_db."""
     if not s.enabled:
         return x
-    noise = make_noise(s.kind, x.size, fs) * np.sqrt(speech_power(x, fs) / 10 ** (s.snr_db / 10))
-    y = x + noise
-    peak = np.max(np.abs(y))
-    return y / peak * 0.95 if peak > 1.0 else y        # rescale only if it would clip
+    speech, noise = noise_parts(x, fs, s)
+    return speech + noise
 
 
 # ---------- removing noise ----------
 
-def remove_noise(x: np.ndarray, fs: int, s: RemoveNoise) -> np.ndarray:
-    """Reduce steady background noise with spectral subtraction or a Wiener filter."""
-    if not s.enabled or x.size < NPERSEG:
-        return x
+def removal_gain(x: np.ndarray, fs: int, s: RemoveNoise) -> np.ndarray:
+    """The gain (0..1) that noise removal gives every frequency of every STFT frame of x."""
     _, _, X = stft(x, fs, nperseg=NPERSEG, noverlap=NOVERLAP)
-    mag, phase = np.abs(X), np.angle(X)
+    mag = np.abs(X)
 
     energy = (mag ** 2).sum(axis=0)
     n_quiet = max(1, int(s.quiet_fraction * mag.shape[1]))
@@ -115,11 +125,36 @@ def remove_noise(x: np.ndarray, fs: int, s: RemoveNoise) -> np.ndarray:
         smoothed = uniform_filter1d(mag ** 2, WIENER_SMOOTH_FRAMES, axis=1)
         snr_post = smoothed / (s.strength * noise_pow + 1e-12)
         snr_prior = np.maximum(snr_post - 1.0, 0.0)
-        gain = np.maximum(snr_prior / (1.0 + snr_prior), s.floor)
-        clean = gain * mag
-    else:
-        clean = np.maximum(mag - s.strength * noise, s.floor * mag)
+        return np.maximum(snr_prior / (1.0 + snr_prior), s.floor)
+    # spectral subtraction, written as a gain: |clean| / |noisy|
+    clean = np.maximum(mag - s.strength * noise, s.floor * mag)
+    return np.divide(clean, mag, out=np.ones_like(mag), where=mag > 0)
 
-    _, y = istft(clean * np.exp(1j * phase), fs, nperseg=NPERSEG, noverlap=NOVERLAP)
+
+def apply_gain(x: np.ndarray, fs: int, gain: np.ndarray) -> np.ndarray:
+    """Multiply x's STFT by the gain (keeping its phase) and rebuild a signal of the same length."""
+    _, _, X = stft(x, fs, nperseg=NPERSEG, noverlap=NOVERLAP)
+    _, y = istft(gain * X, fs, nperseg=NPERSEG, noverlap=NOVERLAP)
     y = y[: x.size]
     return np.pad(y, (0, x.size - y.size))
+
+
+def remove_noise(x: np.ndarray, fs: int, s: RemoveNoise) -> np.ndarray:
+    """Reduce steady background noise with spectral subtraction or a Wiener filter."""
+    if not s.enabled or x.size < NPERSEG:
+        return x
+    return apply_gain(x, fs, removal_gain(x, fs, s))
+
+
+def split_result(speech: np.ndarray, noise: np.ndarray, fs: int, s: RemoveNoise) -> tuple[np.ndarray, np.ndarray]:
+    """What noise removal does to the speech and to the noise, separately.
+
+    The gains are computed from the noisy mix, as usual. Applying a fixed gain to an STFT is linear,
+    so the same gains applied to the speech and to the noise alone give two signals that add up
+    exactly to remove_noise(speech + noise). Then:
+      damage to the voice = speech_out - speech,   leftover noise = noise_out.
+    """
+    if not s.enabled or speech.size < NPERSEG:
+        return speech, noise
+    gain = removal_gain(speech + noise, fs, s)
+    return apply_gain(speech, fs, gain), apply_gain(noise, fs, gain)

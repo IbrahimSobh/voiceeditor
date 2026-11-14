@@ -18,8 +18,15 @@ from scipy.signal import freqz, lfilter, resample_poly, welch
 from .analysis import world_analyze, world_synthesize
 from .audio_io import WORK_FS, load_audio, to_wav_bytes
 from .edits import shift_pitch, warp_formants
-from .noise import NOISE_TYPES, make_noise, speech_power
-from .theme import MUTED
+from .metrics import (
+    METRICS, SEG_MAX_DB, SEG_MIN_DB, in_words, mess_breakdown, quality, segmental_snr_track, verdict,
+)
+from .noise import (
+    NOISE_TYPES, NOVERLAP, NPERSEG, REMOVE_METHODS, AddNoise, RemoveNoise, make_noise, noise_parts,
+    remove_noise, speech_power, split_result,
+)
+from .plots import quality_track_chart
+from .theme import METHOD_COLORS, MUTED, PANEL_COLORS
 
 FS = WORK_FS
 SAMPLE = Path(__file__).resolve().parent.parent / "samples" / "sample_male_en.wav"
@@ -681,7 +688,7 @@ def lesson_noise():
     st.markdown("""
 20 dB is mildly noisy, 5 dB clearly noisy, 0 dB means equal power, negative means the noise is
 stronger. To add noise at a chosen SNR, the app measures Pₛ **on active speech only** (20 ms
-frames louder than 10 % of the loudest frame), so pauses don't make the SNR look better, then
+frames louder than 10 % of the 95th-percentile frame, so one click can't set the scale), so pauses don't make the SNR look better, then
 scales unit-power noise by √(Pₛ / 10^{SNR/10}).
 
 **Removing noise.** Both methods work frame by frame in the STFT domain (32 ms frames, 75 %
@@ -708,7 +715,8 @@ Without it, random noise peaks that survive in isolated bins become short tones:
 **Limits.** Both methods assume the noise is **stationary**: the same spectrum all the time.
 They work on fans, hiss and hum, and poorly on babble, music or traffic that changes. They
 also remove some speech wherever speech is weaker than the noise. Removing more noise always
-damages more speech: listen to *Removed by noise reduction* in the editor to hear it.
+damages more speech: listen to *Removed part* in the editor to hear it,
+and see the next lesson to measure it.
 """)
     st.markdown("##### Try it")
     c1, c2 = st.columns(2)
@@ -744,6 +752,211 @@ damages more speech: listen to *Removed by noise reduction* in the editor to hea
     _play(noise, "Noise alone", where=cols[1])
     mix = x + noise
     _play(mix / max(1.0, np.max(np.abs(mix)) / 0.95), f"Mixed at {snr} dB SNR", where=cols[2])
+
+
+def lesson_quality():
+    st.info("""
+**In plain words.** Take the clean voice. Everything else in the result is *mess*: noise that is
+still there, plus any damage the cleaning did to the voice. Each SNR answers one question:
+**how many times stronger is the voice than the mess?** Bigger is better.
+
+| Number | Means | Sounds like |
+|---|---|---|
+| below 0 dB | the mess is stronger than the voice | noise wins |
+| 0 to 10 dB | voice 1× to 10× stronger | heavy noise |
+| 10 to 20 dB | voice 10× to 100× stronger | noticeable noise |
+| 20 to 30 dB | voice 100× to 1000× stronger | slight noise |
+| above 30 dB | voice over 1000× stronger | almost clean |
+
+Reading dB: **+3 dB ≈ 2×**, **+10 dB = 10×**, **+20 dB = 100×** (in power). So "+5 dB after
+cleaning" means the mess got about 3× weaker.
+
+**LSD** is the odd one out: it compares the *sound colour* (which frequencies are present), and
+**smaller is better**. Below 2 dB the colour is almost identical, 2–5 dB close, 5–10 dB clearly
+different, above 10 dB very different. These LSD bands are a rough guide, not a standard.
+""", icon=":material/lightbulb:")
+    st.markdown("""
+Listening is the final test, but ears disagree and can't be averaged. An **objective quality
+metric** turns "how good is this?" into a number, so methods and settings can be compared fairly.
+The four metrics here are **intrusive** (full-reference): they compare the processed signal ŝ
+with the **clean original** s, sample by sample. That's why the editor shows them only when it
+adds the noise itself: then it knows exactly which part of the mix is speech and which is noise.
+
+**1. SNR: the whole signal at once.** Everything that differs from the clean speech counts as error:
+""")
+    st.latex(r"\text{SNR} = 10\log_{10}\frac{\sum_n s[n]^2}{\sum_n \big(s[n]-\hat s[n]\big)^2}\ \text{dB}")
+    st.markdown("""
+Simple, but two weaknesses. Loud vowels dominate the sums, so errors in quiet consonants barely
+count. And it isn't **scale-invariant**: the clean speech at half volume is "wrong" by s/2 and scores
+only 6 dB, although nothing is lost.
+
+Note: the *Add noise* slider sets the SNR on **active speech** only, while this metric uses the whole
+signal including pauses, so it reads about 2 dB lower for the samples.
+
+**2. Segmental SNR: one SNR per frame, then the average.** Cut both signals into frames
+(32 ms here, the same grid as the noise remover), compute the SNR of each speech frame, clamp it, and average:
+""")
+    st.latex(r"\text{SNR}_\text{seg} = \frac{1}{|\mathcal{M}|}\sum_{m\in\mathcal{M}}"
+             r"\operatorname{clip}_{[-10,\,35]}\!\left(10\log_{10}\frac{\sum_{n} s_m[n]^2}"
+             r"{\sum_{n}\big(s_m[n]-\hat s_m[n]\big)^2}\right)")
+    st.markdown("""
+𝓜 is the set of frames where someone is talking (louder than −20 dB from the 95th-percentile frame,
+the same rule used to set the added-noise level). Every syllable now counts equally, which matches
+hearing better than one global SNR (Quackenbush, Barnwell and Clements, 1988). The clamp stops
+silent frames from going to −∞ and near-perfect frames from going to +∞ and dominating the mean
+(Hansen and Pellom, 1998).
+
+**3. SI-SDR: scale-invariant signal-to-distortion ratio.** First find how much of the reference is in
+the estimate, by projecting ŝ onto s (both with their mean removed). That part is the *target*;
+everything else is distortion:
+""")
+    st.latex(r"\alpha = \frac{\langle \hat s, s\rangle}{\lVert s\rVert^2},\qquad "
+             r"\text{SI-SDR} = 10\log_{10}\frac{\lVert \alpha s\rVert^2}{\lVert \hat s-\alpha s\rVert^2}\ \text{dB}")
+    st.markdown("""
+A change of volume is no longer an error: s/2 scores as perfect. Le Roux, Wisdom, Erdogan and Hershey
+(2019) proposed it to fix the older **BSS Eval SDR** (Vincent, Gribonval and Févotte, 2006), whose
+filtering allowance could be gamed. It's the standard score in speech enhancement and source
+separation papers, usually reported as the **SI-SDR improvement** (SI-SDRi): output minus input.
+
+**4. Log-spectral distance (LSD): compare spectra, not waveforms.** For every speech frame, take the
+power spectra P (clean) and P̂ (processed) in dB and measure their RMS difference over frequency:
+""")
+    st.latex(r"\text{LSD} = \frac{1}{|\mathcal{M}|}\sum_{m\in\mathcal{M}}"
+             r"\sqrt{\frac{1}{K}\sum_{k=1}^{K}\Big(10\log_{10}P_m[k]-10\log_{10}\hat P_m[k]\Big)^2}\ \text{dB}")
+    st.markdown("""
+Lower is better; 0 dB means identical spectra. LSD ignores phase, and because it works in dB, a
+quiet frequency band counts as much as a loud one: it sees what a noise remover does to the
+weak high frequencies that the three SNRs hardly notice (Gray and Markel, 1976).
+Powers are floored 80 dB below the loudest bin so empty bins stay finite.
+
+| Metric | Unit | Better | Scale-invariant | Sensitive to |
+|---|---|---|---|---|
+| SNR | dB | higher | no | loud parts |
+| Segmental SNR | dB | higher | no | every speech frame equally |
+| SI-SDR | dB | higher | **yes** | waveform shape |
+| LSD | dB | **lower** | no | spectral shape, every band equally (phase ignored) |
+
+**What the mess is made of.** After noise removal the mess has two sources: **leftover noise** (noise
+that wasn't removed) and **damage to the voice** (speech removed or changed with it). Both methods
+multiply each STFT bin of the noisy mix X = S + N by a gain G between 0 and 1, and a fixed gain is
+linear, so the result splits exactly:
+""")
+    st.latex(r"\hat S = G\,(S + N) = \underbrace{G S}_{\text{voice after removal}} + "
+             r"\underbrace{G N}_{\text{leftover noise}},\qquad "
+             r"\text{damage} = G S - S")
+    st.markdown("""
+The gains still come from the noisy mix, as in the app; they are just applied to the speech and the
+noise separately. The two parts are nearly independent, so their powers add up to the mess power.
+This turns the strength slider into a visible trade-off: gentle removal leaves noise and spares
+the voice, hard removal does the opposite. The best setting is usually near where the two are equal
+(Loizou's book discusses this speech-distortion versus noise-reduction trade-off at length).
+
+**When the numbers disagree**, each disagreement tells you something:
+
+- **SI-SDR above SNR**: part of the mess SNR sees is only a change of loudness (noise removal also
+  turns the voice down a little).
+- **Segmental SNR below SNR**: the quiet parts of the speech are messier than the loud ones.
+- **SNRs up, LSD down… or LSD up**: LSD weighs every frequency equally, so it notices a remover that
+  turns many weak frequencies down slightly, which the SNRs (dominated by strong frequencies) miss.
+  With hum this is typical.
+- **Result worse than the noisy input**: the removal damages more voice than the noise it removes.
+
+**Limits.** None of these models hearing. Musical noise is a few isolated tones: it costs little SNR
+but sounds annoying. Standardised perceptual scores exist: **PESQ** (ITU-T P.862, 2001) and its
+successor **POLQA** (P.863) predict listener opinion scores, and **STOI** (Taal et al., 2011)
+predicts intelligibility; they need more code or licensed implementations. For this app's
+methods, read the four numbers together, then listen.
+""")
+    st.markdown("##### Try it: score the two noise removers")
+    c1, c2, c3 = st.columns(3)
+    kind = c1.selectbox("Noise type", NOISE_TYPES, key="L11_kind")
+    snr_db = c2.slider("Added noise SNR (dB)", -5, 30, 5, key="L11_snr")
+    strength = c3.slider("Removal strength ×", 0.5, 4.0, 1.0, step=0.1, key="L11_strength")
+    rows, tracks, x_clean, sounds, si_values = _quality_demo(kind, snr_db, strength)
+    st.dataframe(rows, hide_index=True, width="stretch")
+    st.markdown("\n".join(f"- **{row['Signal']}** ({verdict('si_sdr', v)[0]}): {in_words('si_sdr', v)}"
+                          for row, v in zip(rows, si_values)))
+    st.caption("Segmental SNR, frame by frame (speech frames only). Hover for values, drag to zoom, "
+               "click the legend to highlight one.")
+    st.altair_chart(quality_track_chart([{"label": label, "db": db, "speech": speech, "color": color}
+                                         for label, (db, speech, color) in tracks.items()],
+                                        (NPERSEG - NOVERLAP) / FS, SEG_MIN_DB, SEG_MAX_DB), width="stretch")
+    st.markdown("**The trade-off: leftover noise against damage, for every strength.** Each line says how "
+                "many dB stronger the voice is than one part of the mess (higher is better): **dashed** "
+                "against the leftover noise, **solid** against the damage. Raising the "
+                "strength lifts the noise lines and lowers the damage lines; where they cross, both parts are "
+                "equal. For white noise at 5 dB they cross near ×1 for spectral subtraction and ×2 for the "
+                "Wiener filter: the same strengths that give each method its best scores.")
+    st.altair_chart(_tradeoff_chart(kind, snr_db), width="stretch")
+    cols = st.columns(4)
+    _play(x_clean, "Clean reference", where=cols[0])
+    for col, (label, y) in zip(cols[1:], sounds.items()):
+        _play(y, label, where=col)
+    st.markdown("""
+Things to notice: the last row, the clean speech at half volume, loses about 6 dB of SNR and
+segmental SNR while SI-SDR calls it perfect. With **hum**, both removers raise every SNR, yet LSD gets
+worse: hum sits in a few low bins, so the noisy spectrum was already close, while the removal
+lowers speech bins all over the spectrum. Raise the strength to see the trade-off: SNRs climb at
+first, then speech damage takes over. For this voice, spectral subtraction scores best near ×1 and
+drops quickly after; the Wiener filter peaks near ×2. The two Strength values don't mean the same
+thing: spectral subtraction multiplies the noise *magnitude*, the Wiener filter the noise *power*,
+so Wiener ×2 treats the noise as only √2 ≈ 1.4 times louder in magnitude terms.
+""")
+
+
+@st.cache_data(show_spinner=False)
+def _tradeoff_data(kind: str, snr_db: float):
+    x, fs = _sample()
+    ref, noise = noise_parts(x, fs, AddNoise(True, kind, float(snr_db)))
+    rows = []
+    for m in REMOVE_METHODS:
+        for strength in np.arange(0.5, 4.01, 0.25):
+            parts = mess_breakdown(ref, *split_result(ref, noise, fs, RemoveNoise(True, m, float(strength))))
+            rows += [{"strength": strength, "method": m, "part": "vs leftover noise",
+                      "dB": parts["voice_vs_noise_db"]},
+                     {"strength": strength, "method": m, "part": "vs damage", "dB": parts["voice_vs_damage_db"]}]
+    return rows
+
+
+def _tradeoff_chart(kind: str, snr_db: float):
+    import altair as alt
+    import pandas as pd
+
+    return (
+        alt.Chart(pd.DataFrame(_tradeoff_data(kind, snr_db)))
+        .mark_line(point=True)
+        .encode(
+            x=alt.X("strength:Q", title="Strength ×"),
+            y=alt.Y("dB:Q", title="voice stronger by (dB)"),
+            color=alt.Color("method:N", scale=alt.Scale(domain=REMOVE_METHODS,
+                                                        range=[METHOD_COLORS[m] for m in REMOVE_METHODS]),
+                            legend=alt.Legend(orient="top", title=None)),
+            strokeDash=alt.StrokeDash("part:N", legend=None,      # explained in the text: dashed = noise
+                                      scale=alt.Scale(domain=["vs leftover noise", "vs damage"],
+                                                      range=[[5, 3], [1, 0]])),
+            tooltip=["method:N", "part:N", alt.Tooltip("strength:Q", format=".2f"), alt.Tooltip("dB:Q", format=".1f")],
+        )
+        .properties(height=300)
+    )
+
+
+@st.cache_data(show_spinner=False)
+def _quality_demo(kind: str, snr_db: float, strength: float):
+    """Noisy and denoised versions of the sample, with the four metrics of each."""
+    x, fs = _sample()
+    ref, noise = noise_parts(x, fs, AddNoise(True, kind, float(snr_db)))
+    signals = {"With added noise": ref + noise}
+    for m in REMOVE_METHODS:
+        signals[m] = remove_noise(ref + noise, fs, RemoveNoise(True, m, strength))
+    rows, si_values = [], []
+    for label, y in list(signals.items()) + [("Clean speech at half volume", 0.5 * ref)]:
+        q = quality(ref, y, fs)
+        si_values.append(q["si_sdr"])
+        rows.append({"Signal": label} | {f"{lab} ({u}) {'↑' if hi else '↓'}": "> 99" if q[k] > 99 else f"{q[k]:.1f}"
+                                         for k, (lab, u, hi, _) in METRICS.items()})
+    colors = [PANEL_COLORS["noisy"], *(METHOD_COLORS[m] for m in REMOVE_METHODS)]
+    tracks = {label: (*segmental_snr_track(ref, y), c) for (label, y), c in zip(signals.items(), colors)}
+    return rows, tracks, ref, signals, si_values
 
 
 def lesson_arabic():
@@ -788,8 +1001,11 @@ digraph {
   edit [label="Edits\\npitch, range,\\nformants, speed"];
   syn [label="WORLD\\nsynthesis"];
   out [label="Result\\nplay, plot, export"];
+  met [label="Quality metrics\\nSNR, segSNR,\\nSI-SDR, LSD"];
   in -> load -> add -> rem -> ana -> edit -> syn -> out;
   rem -> out [style=dashed, label="no voice edits"];
+  add -> met [style=dashed, label="clean reference"];
+  rem -> met [style=dashed];
 }
 """)
     st.markdown("""
@@ -814,6 +1030,7 @@ digraph {
 | `voiceeditor/audio_io.py` | loading, resampling, normalizing, WAV export |
 | `voiceeditor/noise.py` | adding noise at an SNR; spectral subtraction and Wiener filter |
 | `voiceeditor/analysis.py` | WORLD analysis and synthesis; Praat formants; summary numbers |
+| `voiceeditor/metrics.py` | quality metrics: SNR, segmental SNR, SI-SDR, log-spectral distance |
 | `voiceeditor/edits.py` | pitch, pitch range, formant warp, time stretch; presets |
 | `voiceeditor/plots.py` | panels, click-to-data conversion, spectrum at a moment |
 | `voiceeditor/lessons.py` | these lessons and their demos |
@@ -828,6 +1045,18 @@ digraph {
 - M. Morise, F. Yokomori and K. Ozawa, "WORLD: a vocoder-based high-quality speech synthesis
   system for real-time applications", 2016; M. Morise, "Harvest", 2017; "CheapTrick", 2015;
   "D4C", 2016.
+- S. R. Quackenbush, T. P. Barnwell and M. A. Clements, *Objective Measures of Speech Quality*,
+  Prentice Hall, 1988 (segmental SNR).
+- J. H. L. Hansen and B. L. Pellom, "An effective quality evaluation protocol for speech
+  enhancement algorithms", ICSLP 1998.
+- A. H. Gray and J. D. Markel, "Distance measures for speech processing", IEEE Trans. ASSP, 1976
+  (log-spectral distance).
+- E. Vincent, R. Gribonval and C. Févotte, "Performance measurement in blind audio source
+  separation", IEEE Trans. ASLP, 2006 (BSS Eval SDR).
+- J. Le Roux, S. Wisdom, H. Erdogan and J. R. Hershey, "SDR – half-baked or well done?",
+  ICASSP 2019 (SI-SDR).
+- P. C. Loizou, *Speech Enhancement: Theory and Practice*, 2nd ed., CRC Press, 2013 (objective
+  quality measures for speech enhancement).
 - I. R. Murray and J. L. Arnott, "Toward the simulation of emotion in synthetic speech", 1993.
 - P. Boersma and D. Weenink, *Praat: doing phonetics by computer* (praat.org).
 """)
@@ -853,11 +1082,15 @@ def lesson_glossary():
         "Hann window": "Smooth bell-shaped window that reduces spectral leakage.",
         "Intonation": "The melody of speech: F0 rising and falling over a phrase.",
         "LPC": "Linear prediction: models each sample from past samples; gives an all-pole vocal-tract filter.",
+        "LSD": "Log-spectral distance: RMS difference in dB between two spectra, averaged over frames.",
         "Musical noise": "Short random tones left by spectral subtraction or Wiener filtering.",
         "Nyquist frequency": "Half the sample rate: the highest frequency a digital signal can hold.",
         "Pharyngealization": "Secondary narrowing of the pharynx; makes Arabic emphatics; lowers F2.",
         "Prosody": "Pitch, loudness and timing patterns of speech beyond the individual sounds.",
+        "Reference (clean)": "The original speech a processed signal is compared with by intrusive quality metrics.",
         "Sample rate": "Samples per second (Hz). This app uses 16,000.",
+        "Segmental SNR": "SNR computed per short frame, clamped (here to −10…35 dB) and averaged over speech frames.",
+        "SI-SDR": "Scale-invariant signal-to-distortion ratio: SNR after rescaling the estimate to fit the reference.",
         "SNR": "Signal-to-noise ratio in dB: 10·log10(speech power / noise power).",
         "Source–filter model": "Speech = glottal source shaped by the vocal-tract filter.",
         "Spectrogram": "Picture of spectra over time: time across, frequency up, level as colour.",
@@ -885,9 +1118,10 @@ LESSONS = [
     ("8. The WORLD vocoder", lesson_world),
     ("9. How the voice edits work", lesson_edits),
     ("10. Noise: adding and removing it", lesson_noise),
-    ("11. Arabic emphatic consonants", lesson_arabic),
-    ("12. Tools, code and references", lesson_tools),
-    ("13. Glossary", lesson_glossary),
+    ("11. Measuring quality", lesson_quality),
+    ("12. Arabic emphatic consonants", lesson_arabic),
+    ("13. Tools, code and references", lesson_tools),
+    ("14. Glossary", lesson_glossary),
 ]
 
 

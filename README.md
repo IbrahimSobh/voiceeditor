@@ -5,7 +5,8 @@
 A personal and teaching tool that edits speech with **classic signal processing, no AI**.
 Load a file, record your voice or pick a sample, then change pitch, pitch range, formants
 and speed, or add and remove background noise. See every change on waveforms and
-spectrograms, click any moment to inspect it, and learn how it all works in 13 built-in
+spectrograms, score every noise method with four quality metrics, click any moment to inspect
+it, and learn how it all works in 14 built-in
 lessons ([condensed here](#learn)).
 
 ## Quick start
@@ -91,6 +92,44 @@ loudness, so *Noise alone* and *Removed part* play at their real level. Panels c
 side by side or stacked:
 
 ![Stacked layout: the "Sad" preset makes the pitch flatter, lower and slower](docs/img/editor_stacked.png)
+
+### Measure quality
+
+When noise is added, the app knows the clean speech exactly, so it can score the noisy input
+and **both** removal methods against it, with the same slider settings:
+
+| Metric | Better | What it measures |
+|---|---|---|
+| **SNR** | higher | clean-speech power / error power over the whole signal |
+| **Segmental SNR** | higher | the same per 32 ms speech frame, clamped to −10…35 dB, then averaged: every syllable counts |
+| **SI-SDR** | higher | SNR after rescaling the result to best fit the clean speech: a volume change isn't an error |
+| **LSD** (log-spectral distance) | lower | RMS dB difference between the two spectra: sees damage to weak frequency bands |
+
+Cards show the method in use with its change from the noisy input, and a table compares all
+methods. Four tabs go deeper:
+
+- **In plain words**: a verdict for every number ("noticeable noise", "almost clean"…), what it
+  means as "the voice is N× stronger than the mess", and why the metrics disagree when they do.
+- **What the mess is made of**: the error split exactly into **leftover noise** and **damage to the
+  voice** (the removal is a gain per STFT bin, which is linear, so the same gains applied to the
+  clean speech and the noise separate them). Listen to each part, and get advice: remove harder,
+  more gently, or it's balanced.
+- **Frame by frame**: an interactive chart of the SNR of every 32 ms piece of speech, and the
+  hardest moment of each signal with a button that opens the inspection window there.
+- **Show the math**: each formula with the recording's own numbers, step by step. With voice edits on, the metrics are taken
+before WORLD, since resynthesis no longer lines up with the original sample by sample. All four
+are plain NumPy in `voiceeditor/metrics.py`, with no new dependency. Example, male sample,
+white noise at 10 dB, default settings:
+
+| Signal | SNR ↑ | Seg. SNR ↑ | SI-SDR ↑ | LSD ↓ |
+|---|---|---|---|---|
+| With added noise | 8.1 | 8.0 | 8.0 | 21.6 |
+| Spectral subtraction | 13.5 | 12.4 | 13.6 | 14.7 |
+| Wiener filter | 13.7 | 12.7 | 13.4 | 14.9 |
+
+The metrics don't always agree: with 50 Hz hum at 10 dB, both methods gain about 5 dB of SNR, yet LSD
+gets *worse*, because the removal lowers speech everywhere while the hum only touched a few
+low bins. The lesson *Measuring quality* explains why.
 
 ### What is WORLD?
 
@@ -253,9 +292,9 @@ hiss.
 
 ## Learn
 
-The app's **Learn** view (top right) has 13 lessons with interactive demos you can see and hear.
+The app's **Learn** view (top right) has 14 lessons with interactive demos you can see and hear.
 Below is a condensed version of the core lessons; the app has the full text, more detail,
-the demos, Arabic emphatic consonants, the tools and references, and a glossary.
+the demos, quality metrics, Arabic emphatic consonants, the tools and references, and a glossary.
 
 | Build a vowel from source × filter | Formants and the vowel chart | WORLD, decomposed |
 |---|---|---|
@@ -381,6 +420,26 @@ keeps a little of every frequency to limit **musical noise**, the random beeps l
 Both assume steady noise, and both damage some speech: removing more noise always costs more speech.
 </details>
 
+<details>
+<summary><b>10. Measuring quality</b></summary>
+
+Quality metrics compare the processed signal $\hat s$ with the clean original $s$ (they are
+*intrusive*: they need the clean reference).
+
+- **SNR** $= 10\log_{10}\left(\sum s^2 / \sum (s-\hat s)^2\right)$. Loud vowels dominate it, and
+  the clean speech at half volume scores only 6 dB.
+- **Segmental SNR** averages the SNR of each 32 ms speech frame, clamped to −10…35 dB, so quiet
+  syllables count as much as loud ones (Quackenbush et al., 1988; Hansen and Pellom, 1998).
+- **SI-SDR** first projects $\hat s$ on $s$: $\alpha = \langle\hat s,s\rangle/\lVert s\rVert^2$, then
+  $10\log_{10}\left(\lVert\alpha s\rVert^2/\lVert\hat s-\alpha s\rVert^2\right)$. Volume no longer
+  matters (Le Roux et al., "SDR – half-baked or well done?", 2019).
+- **LSD** is the RMS difference of the two power spectra in dB, averaged over speech frames
+  (Gray and Markel, 1976). Lower is better; it ignores phase and weighs every band equally.
+
+None of them models hearing; perceptual scores such as PESQ (ITU-T P.862) and STOI (Taal et
+al., 2011) need more machinery. Read the numbers together, then listen.
+</details>
+
 ## Settings in the web address
 
 Settings can also be given in the address, which is handy for demos, for example:
@@ -390,7 +449,7 @@ Settings can also be given in the address, which is handy for demos, for example
 - `http://localhost:8501/?view=learn&lesson=7`
 
 Parameters: `sample`, `preset`, `add` (noise type), `snr`, `remove` (method), `click`
-(time in s, frequency in Hz), `layout=stacked`, `view=learn`, `lesson` (1–13).
+(time in s, frequency in Hz), `layout=stacked`, `view=learn`, `lesson` (1–14).
 
 ## Checks and regenerating the docs
 
@@ -399,7 +458,7 @@ Parameters: `sample`, `preset`, `add` (noise type), `snr`, `remove` (method), `c
 ```
 
 Measures that each edit and noise tool does what it claims (pitch ratio, range ratio,
-formant shift, duration, SNR accuracy, noise removal, click-to-data accuracy).
+formant shift, duration, SNR accuracy, noise removal, quality metrics, click-to-data accuracy).
 
 ```
 .venv\Scripts\python make_examples.py
@@ -428,6 +487,7 @@ active, WORLD is skipped, so the noise result is heard exactly.
 | Load, mono, resample to 16 kHz | soundfile, scipy | `voiceeditor/audio_io.py` |
 | Add noise at a chosen SNR | numpy | `voiceeditor/noise.py` |
 | Remove noise (spectral subtraction or Wiener filter) | scipy STFT | `voiceeditor/noise.py` |
+| Quality metrics: SNR, segmental SNR, SI-SDR, LSD | numpy | `voiceeditor/metrics.py` |
 | Split speech into F0, spectral envelope, aperiodicity, and rebuild it | WORLD via pyworld ([what is WORLD?](#what-is-world)) | `voiceeditor/analysis.py` |
 | Formant tracks F1–F3 for display | Praat (parselmouth) | `voiceeditor/analysis.py` |
 | Edits and presets | numpy | `voiceeditor/edits.py` |
