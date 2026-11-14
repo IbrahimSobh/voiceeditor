@@ -1,0 +1,9 @@
+[theme]
+primaryColor = "#7c6cf2"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"   # hides the Deploy button and developer menu
+
+[browser]
+gatherUsageStats = false
