@@ -230,3 +230,28 @@ def quality_track_chart(tracks: list[dict], hop_s: float, lo: float, hi: float, 
         )
         .add_params(pick, zoom)
     )
+
+
+def mess_share_chart(rows: list[tuple[str, dict]], bar: int = 36):
+    """One bar per signal: what share of its mess is leftover noise and what share is damage to the voice."""
+    import altair as alt
+    import pandas as pd
+
+    data = pd.DataFrame([{"signal": name, "part": part, "share": m[key],
+                          "vs voice (dB)": m["voice_vs_noise_db" if key == "noise_share" else "voice_vs_damage_db"]}
+                         for name, m in rows
+                         for part, key in (("Leftover noise", "noise_share"), ("Damage to the voice", "damage_share"))])
+    return (
+        alt.Chart(data, height=alt.Step(bar))     # a fixed height per bar: safe inside tabs that start hidden
+        .mark_bar()
+        .encode(
+            y=alt.Y("signal:N", sort=[n for n, _ in rows], title=None, axis=alt.Axis(labelLimit=220)),
+            x=alt.X("share:Q", stack="normalize", axis=alt.Axis(format="%", title="share of the mess")),
+            color=alt.Color("part:N", scale=alt.Scale(domain=["Leftover noise", "Damage to the voice"],
+                                                      range=["#ff9f2e", "#ff5c8a"]),
+                            legend=alt.Legend(orient="top", title=None)),
+            order=alt.Order("part:N", sort="descending"),
+            tooltip=["signal:N", "part:N", alt.Tooltip("share:Q", format=".0%"),
+                     alt.Tooltip("vs voice (dB):Q", format=".1f", title="voice is this many dB stronger")],
+        )
+    )

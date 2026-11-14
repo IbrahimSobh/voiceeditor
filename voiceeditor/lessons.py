@@ -18,10 +18,12 @@ from scipy.signal import freqz, lfilter, resample_poly, welch
 from .analysis import world_analyze, world_synthesize
 from .audio_io import WORK_FS, load_audio, to_wav_bytes
 from .edits import shift_pitch, warp_formants
-from .metrics import METRICS, SEG_MAX_DB, SEG_MIN_DB, in_words, quality, segmental_snr_track, verdict
+from .metrics import (
+    METRICS, SEG_MAX_DB, SEG_MIN_DB, in_words, mess_breakdown, quality, segmental_snr_track, verdict,
+)
 from .noise import (
     NOISE_TYPES, NOVERLAP, NPERSEG, REMOVE_METHODS, AddNoise, RemoveNoise, make_noise, noise_parts,
-    remove_noise, speech_power,
+    remove_noise, speech_power, split_result,
 )
 from .plots import quality_track_chart
 from .theme import METHOD_COLORS, MUTED, PANEL_COLORS
@@ -834,6 +836,31 @@ Powers are floored 80 dB below the loudest bin so empty bins stay finite.
 | SI-SDR | dB | higher | **yes** | waveform shape |
 | LSD | dB | **lower** | no | spectral shape, every band equally (phase ignored) |
 
+**What the mess is made of.** After noise removal the mess has two sources: **leftover noise** (noise
+that wasn't removed) and **damage to the voice** (speech removed or changed with it). Both methods
+multiply each STFT bin of the noisy mix X = S + N by a gain G between 0 and 1, and a fixed gain is
+linear, so the result splits exactly:
+""")
+    st.latex(r"\hat S = G\,(S + N) = \underbrace{G S}_{\text{voice after removal}} + "
+             r"\underbrace{G N}_{\text{leftover noise}},\qquad "
+             r"\text{damage} = G S - S")
+    st.markdown("""
+The gains still come from the noisy mix, as in the app; they are just applied to the speech and the
+noise separately. The two parts are nearly independent, so their powers add up to the mess power.
+This turns the strength slider into a visible trade-off: gentle removal leaves noise and spares
+the voice, hard removal does the opposite. The best setting is usually near where the two are equal
+(Loizou's book discusses this speech-distortion versus noise-reduction trade-off at length).
+
+**When the numbers disagree**, each disagreement tells you something:
+
+- **SI-SDR above SNR**: part of the mess SNR sees is only a change of loudness (noise removal also
+  turns the voice down a little).
+- **Segmental SNR below SNR**: the quiet parts of the speech are messier than the loud ones.
+- **SNRs up, LSD down… or LSD up**: LSD weighs every frequency equally, so it notices a remover that
+  turns many weak frequencies down slightly, which the SNRs (dominated by strong frequencies) miss.
+  With hum this is typical.
+- **Result worse than the noisy input**: the removal damages more voice than the noise it removes.
+
 **Limits.** None of these models hearing. Musical noise is a few isolated tones: it costs little SNR
 but sounds annoying. Standardised perceptual scores exist: **PESQ** (ITU-T P.862, 2001) and its
 successor **POLQA** (P.863) predict listener opinion scores, and **STOI** (Taal et al., 2011)
@@ -854,6 +881,13 @@ methods, read the four numbers together, then listen.
     st.altair_chart(quality_track_chart([{"label": label, "db": db, "speech": speech, "color": color}
                                          for label, (db, speech, color) in tracks.items()],
                                         (NPERSEG - NOVERLAP) / FS, SEG_MIN_DB, SEG_MAX_DB), width="stretch")
+    st.markdown("**The trade-off: leftover noise against damage, for every strength.** Each line says how "
+                "many dB stronger the voice is than one part of the mess (higher is better): **dashed** "
+                "against the leftover noise, **solid** against the damage. Raising the "
+                "strength lifts the noise lines and lowers the damage lines; where they cross, both parts are "
+                "equal. For white noise at 5 dB they cross near ×1 for spectral subtraction and ×2 for the "
+                "Wiener filter: the same strengths that give each method its best scores.")
+    st.altair_chart(_tradeoff_chart(kind, snr_db), width="stretch")
     cols = st.columns(4)
     _play(x_clean, "Clean reference", where=cols[0])
     for col, (label, y) in zip(cols[1:], sounds.items()):
@@ -868,6 +902,42 @@ drops quickly after; the Wiener filter peaks near ×2. The two Strength values d
 thing: spectral subtraction multiplies the noise *magnitude*, the Wiener filter the noise *power*,
 so Wiener ×2 treats the noise as only √2 ≈ 1.4 times louder in magnitude terms.
 """)
+
+
+@st.cache_data(show_spinner=False)
+def _tradeoff_data(kind: str, snr_db: float):
+    x, fs = _sample()
+    ref, noise = noise_parts(x, fs, AddNoise(True, kind, float(snr_db)))
+    rows = []
+    for m in REMOVE_METHODS:
+        for strength in np.arange(0.5, 4.01, 0.25):
+            parts = mess_breakdown(ref, *split_result(ref, noise, fs, RemoveNoise(True, m, float(strength))))
+            rows += [{"strength": strength, "method": m, "part": "vs leftover noise",
+                      "dB": parts["voice_vs_noise_db"]},
+                     {"strength": strength, "method": m, "part": "vs damage", "dB": parts["voice_vs_damage_db"]}]
+    return rows
+
+
+def _tradeoff_chart(kind: str, snr_db: float):
+    import altair as alt
+    import pandas as pd
+
+    return (
+        alt.Chart(pd.DataFrame(_tradeoff_data(kind, snr_db)))
+        .mark_line(point=True)
+        .encode(
+            x=alt.X("strength:Q", title="Strength ×"),
+            y=alt.Y("dB:Q", title="voice stronger by (dB)"),
+            color=alt.Color("method:N", scale=alt.Scale(domain=REMOVE_METHODS,
+                                                        range=[METHOD_COLORS[m] for m in REMOVE_METHODS]),
+                            legend=alt.Legend(orient="top", title=None)),
+            strokeDash=alt.StrokeDash("part:N", legend=None,      # explained in the text: dashed = noise
+                                      scale=alt.Scale(domain=["vs leftover noise", "vs damage"],
+                                                      range=[[5, 3], [1, 0]])),
+            tooltip=["method:N", "part:N", alt.Tooltip("strength:Q", format=".2f"), alt.Tooltip("dB:Q", format=".1f")],
+        )
+        .properties(height=300)
+    )
 
 
 @st.cache_data(show_spinner=False)

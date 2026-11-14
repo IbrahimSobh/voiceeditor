@@ -15,6 +15,7 @@ from voiceeditor.audio_io import load_audio
 from voiceeditor.edits import PRESETS, EditSettings, apply_edits
 from voiceeditor.noise import (
     NOISE_TYPES, REMOVE_METHODS, AddNoise, RemoveNoise, add_noise, noise_parts, remove_noise, speech_power,
+    split_result,
 )
 
 SAMPLE = Path(__file__).parent / "samples" / "sample_male_en.wav"
@@ -108,6 +109,17 @@ def main():
               f"segSNR {q_noisy['seg_snr']:.1f} -> {q['seg_snr']:.1f} dB, "
               f"LSD {q_noisy['lsd']:.1f} -> {q['lsd']:.1f} dB "
               f"{'OK' if good else 'FAIL'}")
+
+    # Leftover noise + voice after removal must add up exactly to the removal's output.
+    for method in REMOVE_METHODS:
+        r = RemoveNoise(True, method)
+        speech_out, noise_out = split_result(speech, noise, fs, r)
+        mess = metrics.mess_breakdown(speech, speech_out, noise_out)
+        good = (np.allclose(speech_out + noise_out, remove_noise(speech + noise, fs, r))
+                and abs(mess["noise_share"] + mess["damage_share"] - 1) < 1e-9)
+        ok &= good
+        print(f"split ({method}): parts add up, mess = {mess['noise_share']:.0%} noise + "
+              f"{mess['damage_share']:.0%} damage {'OK' if good else 'FAIL'}")
 
     # A click at a known (time, frequency) must map back to that time and frequency.
     ft = formant_tracks(x, fs, ceiling)

@@ -105,8 +105,18 @@ and **both** removal methods against it, with the same slider settings:
 | **SI-SDR** | higher | SNR after rescaling the result to best fit the clean speech: a volume change isn't an error |
 | **LSD** (log-spectral distance) | lower | RMS dB difference between the two spectra: sees damage to weak frequency bands |
 
-Cards show the method in use with its change from the noisy input, a table compares all
-methods, and a chart plots the SNR of every frame. With voice edits on, the metrics are taken
+Cards show the method in use with its change from the noisy input, and a table compares all
+methods. Four tabs go deeper:
+
+- **In plain words**: a verdict for every number ("noticeable noise", "almost clean"…), what it
+  means as "the voice is N× stronger than the mess", and why the metrics disagree when they do.
+- **What the mess is made of**: the error split exactly into **leftover noise** and **damage to the
+  voice** (the removal is a gain per STFT bin, which is linear, so the same gains applied to the
+  clean speech and the noise separate them). Listen to each part, and get advice: remove harder,
+  more gently, or it's balanced.
+- **Frame by frame**: an interactive chart of the SNR of every 32 ms piece of speech, and the
+  hardest moment of each signal with a button that opens the inspection window there.
+- **Show the math**: each formula with the recording's own numbers, step by step. With voice edits on, the metrics are taken
 before WORLD, since resynthesis no longer lines up with the original sample by sample. All four
 are plain NumPy in `voiceeditor/metrics.py`, with no new dependency. Example, male sample,
 white noise at 10 dB, default settings:

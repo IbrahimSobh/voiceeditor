@@ -175,3 +175,81 @@ def change_in_words(key: str, before: float, after: float) -> str:
 
 DB_CHEAT_SHEET = ("Reading dB: +3 dB ≈ 2× stronger · +10 dB = 10× · +20 dB = 100× · 0 dB = equal · "
                   "negative = the mess is stronger than the voice.")
+
+
+# ---------- going deeper: what the mess is made of, the math, the worst moment ----------
+
+def mess_breakdown(speech: np.ndarray, speech_out: np.ndarray, noise_out: np.ndarray) -> dict[str, float]:
+    """Split the mess into leftover noise and damage to the voice (see noise.split_result).
+
+    Powers are summed over the whole signal. The two parts are nearly independent, so their powers
+    add up to the mess power (within a few %); the shares are given out of their sum.
+    """
+    damage, leftover = speech_out - speech, noise_out
+    p_s, p_d, p_n = (float(np.sum(v ** 2)) for v in (speech, damage, leftover))
+    total = p_d + p_n + EPS
+    return {
+        "noise_share": p_n / total,
+        "damage_share": p_d / total,
+        "voice_vs_noise_db": float(10 * np.log10(p_s / (p_n + EPS) + EPS)),    # higher = less noise left
+        "voice_vs_damage_db": float(10 * np.log10(p_s / (p_d + EPS) + EPS)),    # higher = less damage
+    }
+
+
+def worked_numbers(ref: np.ndarray, est: np.ndarray, fs: int) -> dict[str, float]:
+    """The intermediate numbers behind each metric, to show the math with real values."""
+    n = min(ref.size, est.size)
+    ref, est = ref[:n], est[:n]
+    track, speech = segmental_snr_track(ref, est)
+    raw = 10 * np.log10(np.sum(_frames(ref) ** 2, axis=1) / (np.sum(_frames(ref - est) ** 2, axis=1) + EPS) + EPS)
+    s, s_hat = ref - ref.mean(), est - est.mean()
+    a = np.dot(s_hat, s) / (np.dot(s, s) + EPS)
+    return {
+        "p_speech": float(np.sum(ref ** 2)),
+        "p_error": float(np.sum((ref - est) ** 2)),
+        "frames": int(track.size),
+        "speech_frames": int(speech.sum()),
+        "clamped_low": int(np.sum(raw[speech] < SEG_MIN_DB)),
+        "clamped_high": int(np.sum(raw[speech] > SEG_MAX_DB)),
+        "seg_min": float(track[speech].min()) if speech.any() else float("nan"),
+        "seg_max": float(track[speech].max()) if speech.any() else float("nan"),
+        "alpha": float(a),
+        "p_target": float(np.sum((a * s) ** 2)),
+        "p_distortion": float(np.sum((s_hat - a * s) ** 2)),
+        "bins": NPERSEG // 2 + 1,
+        "hz_per_bin": fs / NPERSEG,
+    }
+
+
+def worst_moment(ref: np.ndarray, est: np.ndarray, fs: int) -> tuple[float, float] | None:
+    """Time (s, frame centre) and SNR (dB) of the worst speech frame, or None without speech."""
+    track, speech = segmental_snr_track(ref, est)
+    if not speech.any():
+        return None
+    i = int(np.flatnonzero(speech)[np.argmin(track[speech])])
+    return (i * (NPERSEG - NOVERLAP) + NPERSEG / 2) / fs, float(track[i])
+
+
+def disagreements(q: dict[str, float], base: dict[str, float] | None = None) -> list[str]:
+    """Plain-words notes on why the four numbers don't tell the same story, when they don't."""
+    notes = []
+    if q["si_sdr"] - q["snr"] > 1.0:
+        notes.append(f"**SI-SDR is {q['si_sdr'] - q['snr']:.1f} dB above SNR.** Part of what SNR counts as mess is "
+                     "only a change of loudness: noise removal also turns the voice down a little. SI-SDR "
+                     "forgives that, SNR doesn't.")
+    if q["seg_snr"] < q["snr"] - 2.0:
+        notes.append(f"**Segmental SNR is {q['snr'] - q['seg_snr']:.1f} dB below SNR.** The quiet parts of the "
+                     "speech are messier than the loud ones; one global SNR hides that because loud vowels "
+                     "dominate it.")
+    elif q["seg_snr"] > q["snr"] + 2.0:
+        notes.append(f"**Segmental SNR is {q['seg_snr'] - q['snr']:.1f} dB above SNR.** The mess sits mostly in a "
+                     "few loud moments; most syllables are cleaner than the global number suggests.")
+    if base is not None and q["si_sdr"] > base["si_sdr"] and q["lsd"] > base["lsd"]:
+        notes.append(f"**The SNRs improved but LSD got worse ({base['lsd']:.1f} → {q['lsd']:.1f} dB).** The noise "
+                     "only touched a few frequencies (hum does this), so the sound colour was already close. "
+                     "Noise removal turned many frequencies down a little, which the SNRs barely notice and LSD, "
+                     "which treats every frequency equally, does.")
+    if base is not None and q["si_sdr"] < base["si_sdr"]:
+        notes.append("**The result is worse than the noisy input.** The removal damages more voice than the noise "
+                     "it takes away: lower the Strength or raise the spectral floor.")
+    return notes

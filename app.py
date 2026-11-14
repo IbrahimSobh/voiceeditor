@@ -24,12 +24,12 @@ from voiceeditor.analysis import WorldParams, formant_ceiling, formant_tracks, s
 from voiceeditor.audio_io import load_audio, normalize, to_wav_bytes
 from voiceeditor.edits import PRESETS, EditSettings, apply_edits
 from voiceeditor.metrics import (
-    DB_CHEAT_SHEET, METRICS, SEG_MAX_DB, SEG_MIN_DB, change_in_words, in_words, quality, segmental_snr_track,
-    verdict,
+    DB_CHEAT_SHEET, METRICS, SEG_MAX_DB, SEG_MIN_DB, change_in_words, disagreements, in_words, mess_breakdown,
+    quality, segmental_snr_track, verdict, worked_numbers, worst_moment,
 )
 from voiceeditor.metrics import times as as_times    # app.py already uses `times` for frame times
 from voiceeditor.noise import (
-    NOISE_TYPES, NOVERLAP, NPERSEG, REMOVE_METHODS, AddNoise, RemoveNoise, noise_parts, remove_noise,
+    NOISE_TYPES, NOVERLAP, NPERSEG, REMOVE_METHODS, AddNoise, RemoveNoise, noise_parts, remove_noise, split_result,
 )
 from voiceeditor.theme import METHOD_COLORS, PANEL_COLORS
 
@@ -135,11 +135,18 @@ def quality_report(data: bytes, add_key: tuple, remove_key: tuple):
     Both methods use the same slider settings (strength, floor, noise estimate), whichever one is in use.
     """
     _, fs = load(data)
-    ref, _ = noisy_parts(data, add_key)
-    signals = {"noisy": noisy_signal(data, add_key)}
+    ref, noise = noisy_parts(data, add_key)
+    parts = {"noisy": (ref, noise)}           # (what became of the speech, what became of the noise)
     for m in REMOVE_METHODS:
-        signals[m] = cleaned_signal(data, add_key, replace(RemoveNoise(*remove_key), enabled=True, method=m).key())
-    return {name: (quality(ref, sig, fs), *segmental_snr_track(ref, sig)) for name, sig in signals.items()}
+        parts[m] = split_result(ref, noise, fs, replace(RemoveNoise(*remove_key), enabled=True, method=m))
+    report = {}
+    for name, (speech_out, noise_out) in parts.items():
+        sig = speech_out + noise_out          # = the noisy mix, or exactly remove_noise(mix)
+        db, speech = segmental_snr_track(ref, sig)
+        report[name] = {"q": quality(ref, sig, fs), "db": db, "speech": speech, "math": worked_numbers(ref, sig, fs),
+                        "mess": mess_breakdown(ref, speech_out, noise_out), "worst": worst_moment(ref, sig, fs),
+                        "leftover": noise_out, "damage": speech_out - ref}
+    return report
 
 
 def wav(sig: np.ndarray, fs: int) -> bytes:
@@ -463,28 +470,114 @@ def verdict_chip(key: str, value: float) -> str:
 
 def plain_words(report: dict, shown: str) -> None:
     """The numbers explained for someone who has never seen a dB: one headline, then one line per metric."""
-    q, base = report[shown][0], report["noisy"][0]
-    with st.container(border=True):
-        st.markdown("**In plain words.** The *mess* is everything that isn't the clean voice: leftover noise "
-                    "plus any damage to the voice. Each SNR says how much stronger the voice is than the mess.")
-        if shown == "noisy":
-            head = (f"The added noise leaves the voice **{as_times(q['si_sdr'])} stronger** than the noise: "
-                    f"{verdict('si_sdr', q['si_sdr'])[0]}. Turn on **Remove noise** to see how much each method "
-                    "cleans up.")
+    q, base = report[shown]["q"], report["noisy"]["q"]
+    st.markdown("The *mess* is everything that isn't the clean voice: leftover noise plus any damage to the "
+                "voice. Each SNR says how much stronger the voice is than the mess.")
+    if shown == "noisy":
+        head = (f"The added noise leaves the voice **{as_times(q['si_sdr'])} stronger** than the noise: "
+                f"{verdict('si_sdr', q['si_sdr'])[0]}. Turn on **Remove noise** to see how much each method "
+                "cleans up.")
+    else:
+        gain = q["si_sdr"] - base["si_sdr"]
+        how = f"**{as_times(gain)} weaker**" if gain >= 0 else f"**{as_times(-gain)} stronger** (worse)"
+        head = (f"**{shown}** made the mess {how} than in the noisy input (SI-SDR {gain:+.1f} dB). "
+                f"What's left: {verdict('si_sdr', q['si_sdr'])[0]}.")
+    st.markdown(head)
+    lines = []
+    for k, (label, unit, _, _) in METRICS.items():
+        change = "" if shown == "noisy" else " " + change_in_words(k, base[k], q[k])
+        lines.append(f"- {verdict_chip(k, q[k])} **{label} {fmt_db(q[k])} {unit}**: {in_words(k, q[k])}{change}")
+    st.markdown("\n".join(lines), unsafe_allow_html=True)
+    notes = disagreements(q, None if shown == "noisy" else base)
+    if notes:
+        st.markdown("**Why the numbers don't all agree**\n\n" + "\n".join(f"- {n}" for n in notes))
+    st.caption(DB_CHEAT_SHEET + " Verdicts for the SNRs: below 0 dB noise wins, 0–10 heavy noise, "
+               "10–20 noticeable, 20–30 slight, above 30 almost clean. LSD: below 2 dB almost identical, "
+               "2–5 close, 5–10 clearly different, above 10 very different (a rough guide).")
+
+
+def mess_tab(report: dict, shown: str, names: dict) -> None:
+    """Leftover noise vs damage to the voice: a chart for every signal, then advice and players for the one shown."""
+    st.markdown("The mess has two sources. **Leftover noise**: noise the removal didn't take away. **Damage to "
+                "the voice**: speech the removal took away or changed. Removing harder trades the first for "
+                "the second. The app can split them exactly: the removal multiplies every frequency of every "
+                "frame by a gain, and applying the same gains to the clean speech and to the noise separately "
+                "gives two parts that add up to the result.")
+    st.altair_chart(plots.mess_share_chart([(names[n], r["mess"]) for n, r in report.items()]), width="stretch")
+    m = report[shown]["mess"]
+    if shown == "noisy":
+        st.markdown("Before any removal the mess is **all noise** and the voice is untouched.")
+    else:
+        st.markdown(f"With **{shown}**, **{m['noise_share']:.0%}** of the mess is leftover noise and "
+                    f"**{m['damage_share']:.0%}** is damage to the voice. The voice is "
+                    f"**{as_times(m['voice_vs_noise_db'])} stronger** than the leftover noise "
+                    f"({m['voice_vs_noise_db']:.1f} dB) and **{as_times(m['voice_vs_damage_db'])} stronger** than "
+                    f"the damage ({m['voice_vs_damage_db']:.1f} dB).")
+        if m["noise_share"] > 0.7:
+            st.markdown(":material/arrow_upward: Mostly **noise is left**: you can remove harder (raise *Strength*).")
+        elif m["damage_share"] > 0.7:
+            st.markdown(":material/arrow_downward: Mostly **damage**: remove more gently (lower *Strength* or raise "
+                        "the *spectral floor*).")
         else:
-            gain = q["si_sdr"] - base["si_sdr"]
-            how = f"**{as_times(gain)} weaker**" if gain >= 0 else f"**{as_times(-gain)} stronger** (worse)"
-            head = (f"**{shown}** made the mess {how} than in the noisy input (SI-SDR {gain:+.1f} dB). "
-                    f"What's left: {verdict('si_sdr', q['si_sdr'])[0]}.")
-        st.markdown(head)
-        lines = []
-        for k, (label, unit, _, _) in METRICS.items():
-            change = "" if shown == "noisy" else " " + change_in_words(k, base[k], q[k])
-            lines.append(f"- {verdict_chip(k, q[k])} **{label} {fmt_db(q[k])} {unit}**: {in_words(k, q[k])}{change}")
-        st.markdown("\n".join(lines), unsafe_allow_html=True)
-        st.caption(DB_CHEAT_SHEET + " Verdicts for the SNRs: below 0 dB noise wins, 0–10 heavy noise, "
-                   "10–20 noticeable, 20–30 slight, above 30 almost clean. LSD: below 2 dB almost identical, "
-                   "2–5 close, 5–10 clearly different, above 10 very different (a rough guide).")
+            st.markdown(":material/balance: **Balanced**: leftover noise and damage are of similar size, usually "
+                        "close to the best setting for this method.")
+        c1, c2 = st.columns(2)
+        c1.caption("Leftover noise (true level: turn the volume up)")
+        c1.audio(wav(report[shown]["leftover"], fs), format="audio/wav")
+        c2.caption("Damage to the voice (true level: turn the volume up)")
+        c2.audio(wav(report[shown]["damage"], fs), format="audio/wav")
+
+
+def frames_tab(report: dict, names: dict) -> None:
+    colors = {"noisy": PANEL_COLORS["noisy"]} | METHOD_COLORS
+    tracks = [{"label": names[n], "db": r["db"], "speech": r["speech"], "color": colors[n], "mean": r["q"]["seg_snr"]}
+              for n, r in report.items()]
+    st.altair_chart(plots.quality_track_chart(tracks, (NPERSEG - NOVERLAP) / fs, SEG_MIN_DB, SEG_MAX_DB),
+                    width="stretch")
+    st.caption("SNR of every 32 ms piece of speech (clamped to −10…35 dB); the mean of each line is its segmental "
+               "SNR. Hover for values, drag to zoom, double-click to reset, click the legend to highlight one. "
+               "Gaps are pauses, which aren't scored.")
+    st.markdown("**The hardest moment** of each signal: its worst piece of speech, usually a quiet syllable "
+                "or the end of a word, where the voice is weakest compared with the noise.")
+    for n, r in report.items():
+        if r["worst"] is None:
+            continue
+        t, db = r["worst"]
+        c1, c2 = st.columns([4, 1], vertical_alignment="center")
+        c1.markdown(f"- **{names[n]}**: at **{t:.2f} s**, frame SNR {db:.1f} dB "
+                    f"(voice {as_times(db)} {'stronger' if db >= 0 else 'weaker'} than the mess there).")
+        if c2.button("Inspect", key=f"worst_{n}", icon=":material/search:", width="stretch"):
+            st.session_state.cursor = plots.Click("wave", t, None)
+            st.session_state.open_inspect = True
+            st.rerun()
+
+
+def math_tab(report: dict, shown: str, names: dict) -> None:
+    """Each formula with this recording's own numbers, step by step."""
+    q, w = report[shown]["q"], report[shown]["math"]
+    st.markdown(f"For **{names[shown]}**, s is the clean speech and ŝ the result. Powers are sums of squared "
+                "samples.")
+    st.markdown("**SNR**: power of the voice divided by power of the mess, in dB.")
+    st.latex(rf"10\log_{{10}}\frac{{\sum s^2}}{{\sum (s-\hat s)^2}} = 10\log_{{10}}\frac{{{w['p_speech']:.1f}}}"
+             rf"{{{w['p_error']:.2f}}} = 10\log_{{10}}({w['p_speech'] / w['p_error']:.1f})"
+             rf" = {q['snr']:.1f}\ \text{{dB}}")
+    st.markdown(f"**Segmental SNR**: the recording is cut into {w['frames']} pieces of 32 ms (a new one every "
+                f"8 ms). **{w['speech_frames']}** of them contain speech; the others are pauses and are skipped. "
+                f"Each speech piece gets its own SNR, from **{w['seg_min']:.1f}** (worst) to **{w['seg_max']:.1f} "
+                f"dB** (best). {w['clamped_low']} pieces were raised to −10 dB and {w['clamped_high']} lowered "
+                "to 35 dB by the clamp, so no single piece can dominate. Their average:")
+    st.latex(rf"\text{{SNR}}_\text{{seg}} = \frac{{1}}{{{w['speech_frames']}}}\sum_{{m}} \text{{SNR}}_m = "
+             rf"{q['seg_snr']:.1f}\ \text{{dB}}")
+    st.markdown(f"**SI-SDR**: first find how loud the voice is inside the result: α = **{w['alpha']:.3f}**, so "
+                f"the result contains the voice at {w['alpha']:.0%} of its original amplitude. That scaled voice "
+                "is the *target*; everything else is *distortion*.")
+    st.latex(rf"\alpha = \frac{{\langle \hat s, s\rangle}}{{\lVert s\rVert^2}} = {w['alpha']:.3f},\qquad "
+             rf"10\log_{{10}}\frac{{\lVert\alpha s\rVert^2}}{{\lVert\hat s-\alpha s\rVert^2}} = "
+             rf"10\log_{{10}}\frac{{{w['p_target']:.1f}}}{{{w['p_distortion']:.2f}}} = {q['si_sdr']:.1f}\ \text{{dB}}")
+    st.markdown(f"**LSD**: in each of the {w['speech_frames']} speech pieces, compare the level of "
+                f"{w['bins']} frequencies ({w['hz_per_bin']:.2f} Hz apart, 0 to {fs // 2} Hz) between s and ŝ in dB, "
+                f"and take the RMS of the differences. The average over the pieces is **{q['lsd']:.1f} dB**: "
+                "a typical frequency is that far from its clean level, up or down.")
 
 
 def fmt_db(v: float) -> str:
@@ -501,7 +594,7 @@ else:
     shown = rem_s.method if rem_s.enabled else "noisy"
     cards = st.columns(len(METRICS))
     for col, (k, (label, unit, higher, help_text)) in zip(cards, METRICS.items()):
-        value, base = report[shown][0][k], report["noisy"][0][k]
+        value, base = report[shown]["q"][k], report["noisy"]["q"][k]
         delta = None if shown == "noisy" else f"{value - base:+.1f}"
         col.metric(f"{SHORT.get(k, label)} ({unit}) {'↑' if higher else '↓'}", fmt_db(value), delta,
                    delta_color="normal" if higher else "inverse", help=help_text, border=True)
@@ -509,27 +602,32 @@ else:
                 if rem_s.enabled else "With added noise, before any removal")
                + (" · measured before the voice edits: after WORLD rebuilds the voice, the waveform no longer "
                   "lines up sample by sample with the original" if not voice.is_neutral() else ""))
-    plain_words(report, shown)
 
     names = {"noisy": "With added noise"} | {m: m for m in REMOVE_METHODS}
     rows = []
-    for name, (q, _, _) in report.items():
+    for name, r in report.items():
+        q = r["q"]
         row = {"Signal": names[name] + ("  ◀ in use" if rem_s.enabled and name == rem_s.method else "")}
         row |= {f"{lab} ({u}) {'↑' if hi else '↓'}": fmt_db(q[k]) for k, (lab, u, hi, _) in METRICS.items()}
-        row["SI-SDR gain (dB)"] = "–" if name == "noisy" else f"{q['si_sdr'] - report['noisy'][0]['si_sdr']:+.1f}"
+        row["SI-SDR gain (dB)"] = "–" if name == "noisy" else f"{q['si_sdr'] - report['noisy']['q']['si_sdr']:+.1f}"
+        row["Leftover noise / damage"] = f"{r['mess']['noise_share']:.0%} / {r['mess']['damage_share']:.0%}"
         row["In words"] = verdict("si_sdr", q["si_sdr"])[0]
         rows.append(row)
     st.dataframe(rows, hide_index=True, width="stretch")
-    colors = {"noisy": PANEL_COLORS["noisy"]} | METHOD_COLORS
-    tracks = [{"label": names[n], "db": db, "speech": sp, "color": colors[n], "mean": q["seg_snr"]}
-              for n, (q, db, sp) in report.items()]
-    st.altair_chart(plots.quality_track_chart(tracks, (NPERSEG - NOVERLAP) / fs, SEG_MIN_DB, SEG_MAX_DB),
-                    width="stretch")
-    st.caption("Frame-by-frame SNR over the speech (32 ms frames, clamped to −10…35 dB); its mean is the "
-               "segmental SNR. Hover for values, drag to zoom, click the legend to highlight one. "
-               "Both methods use the same Strength, floor and noise-estimate sliders. "
-               "↑ higher is better, ↓ lower is better. Numbers don't replace listening: musical noise can "
-               "score well and still sound bad.")
+
+    tabs = st.tabs([":material/lightbulb: In plain words", ":material/pie_chart: What the mess is made of",
+                    ":material/show_chart: Frame by frame", ":material/function: Show the math"])
+    with tabs[0]:
+        plain_words(report, shown)
+    with tabs[1]:
+        mess_tab(report, shown, names)
+    with tabs[2]:
+        frames_tab(report, names)
+    with tabs[3]:
+        math_tab(report, shown, names)
+    st.caption("Both methods use the same Strength, floor and noise-estimate sliders. ↑ higher is better, "
+               "↓ lower is better. Numbers don't replace listening: musical noise can score well and still "
+               "sound bad.")
 
 if st.session_state.pop("open_inspect", False) and st.session_state.cursor is not None:
     inspect(st.session_state.cursor)
