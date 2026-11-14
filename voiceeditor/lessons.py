@@ -23,6 +23,7 @@ from .noise import (
     NOISE_TYPES, NOVERLAP, NPERSEG, REMOVE_METHODS, AddNoise, RemoveNoise, make_noise, noise_parts,
     remove_noise, speech_power,
 )
+from .plots import quality_track_chart
 from .theme import METHOD_COLORS, MUTED, PANEL_COLORS
 
 FS = WORK_FS
@@ -826,19 +827,11 @@ methods, read the four numbers together, then listen.
     strength = c3.slider("Removal strength ×", 0.5, 4.0, 1.0, step=0.1, key="L11_strength")
     rows, tracks, x_clean, sounds = _quality_demo(kind, snr_db, strength)
     st.dataframe(rows, hide_index=True, width="stretch")
-    f = _fig(10, 2.4)
-    ax = f.subplots()
-    for label, (db, speech, color) in tracks.items():
-        t = np.arange(db.size) * (NPERSEG - NOVERLAP) / FS
-        ax.plot(t, np.where(speech, db, np.nan), color=color, linewidth=1, label=label)
-    ax.set_ylim(SEG_MIN_DB - 2, SEG_MAX_DB + 2)
-    ax.set_xlabel("time (s)", fontsize=8)
-    ax.set_ylabel("frame SNR (dB)", fontsize=8)
-    ax.set_title("segmental SNR, frame by frame (speech frames only)", fontsize=9)
-    ax.tick_params(labelsize=7)
-    ax.grid(alpha=0.3)
-    ax.legend(fontsize=7, ncol=3, loc="lower right")
-    _show(f)
+    st.caption("Segmental SNR, frame by frame (speech frames only). Hover for values, drag to zoom, "
+               "click the legend to highlight one.")
+    st.altair_chart(quality_track_chart([{"label": label, "db": db, "speech": speech, "color": color}
+                                         for label, (db, speech, color) in tracks.items()],
+                                        (NPERSEG - NOVERLAP) / FS, SEG_MIN_DB, SEG_MAX_DB), width="stretch")
     cols = st.columns(4)
     _play(x_clean, "Clean reference", where=cols[0])
     for col, (label, y) in zip(cols[1:], sounds.items()):

@@ -480,9 +480,10 @@ else:
     colors = {"noisy": PANEL_COLORS["noisy"]} | METHOD_COLORS
     tracks = [{"label": names[n], "db": db, "speech": sp, "color": colors[n], "mean": q["seg_snr"]}
               for n, (q, db, sp) in report.items()]
-    st.pyplot(plots.quality_track_figure(tracks, (NPERSEG - NOVERLAP) / fs, SEG_MIN_DB, SEG_MAX_DB))
+    st.altair_chart(plots.quality_track_chart(tracks, (NPERSEG - NOVERLAP) / fs, SEG_MIN_DB, SEG_MAX_DB),
+                    width="stretch")
     st.caption("Frame-by-frame SNR over the speech (32 ms frames, clamped to −10…35 dB); its mean is the "
-               "segmental SNR. Both methods use the same Strength, floor and noise-estimate sliders. "
+               "segmental SNR. Hover for values, drag to zoom, click the legend to highlight one. Both methods use the same Strength, floor and noise-estimate sliders. "
                "↑ higher is better, ↓ lower is better. Numbers don't replace listening: musical noise can "
                "score well and still sound bad.")
 

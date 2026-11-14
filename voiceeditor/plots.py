@@ -189,23 +189,44 @@ def close(fig) -> None:
     """Nothing to release: figures made without pyplot are freed like normal objects."""
 
 
-def quality_track_figure(tracks: list[dict], hop_s: float, lo: float, hi: float, size: tuple = (10, 2.4)):
-    """Segmental SNR over time, one line per signal; frames without speech are left out.
 
+def quality_track_chart(tracks: list[dict], hop_s: float, lo: float, hi: float, height: int = 300):
+    """Segmental SNR over time as an interactive web chart (Altair, which ships with Streamlit).
+
+    Hover a line for its value, drag or scroll to zoom in time, double-click to reset, and click a
+    legend entry to highlight one signal. Frames without speech are left out: each run of speech frames
+    is its own line piece, so the lines break at pauses instead of jumping across them.
     Each track: {"label", "db" (per frame), "speech" (bool mask), "color", optional "mean"}.
     """
-    fig = _new_figure(size)
-    ax = fig.subplots()
+    import altair as alt
+    import pandas as pd
+
+    parts = []
     for tr in tracks:
-        t = np.arange(tr["db"].size) * hop_s
-        ax.plot(t, np.where(tr["speech"], tr["db"], np.nan), color=tr["color"], linewidth=1.1,
-                label=tr["label"] + (f'  (mean {tr["mean"]:.1f} dB)' if tr.get("mean") is not None else ""))
-    ax.set_ylim(lo - 2, hi + 2)
-    ax.axhline(0, color=MUTED, linewidth=0.6, linestyle=":")
-    ax.set_xlabel("time (s)", fontsize=8)
-    ax.set_ylabel("frame SNR (dB)", fontsize=8)
-    ax.tick_params(labelsize=7)
-    ax.grid(alpha=0.3)
-    ax.legend(fontsize=7, loc="lower right", ncol=len(tracks))
-    fig.tight_layout()
-    return fig
+        name = tr["label"] + (f' · mean {tr["mean"]:.1f} dB' if tr.get("mean") is not None else "")
+        speech = np.asarray(tr["speech"], bool)
+        run = np.cumsum(np.diff(speech.astype(int), prepend=0) == 1)       # 1, 2, 3 … per speech run
+        frames = np.flatnonzero(speech)
+        parts.append(pd.DataFrame({"time (s)": frames * hop_s, "frame SNR (dB)": tr["db"][frames],
+                                   "signal": name, "piece": run[frames]}))
+    data = pd.concat(parts, ignore_index=True)
+    names = [p["signal"].iat[0] for p in parts if len(p)]
+    colors = [tr["color"] for tr, p in zip(tracks, parts) if len(p)]
+
+    pick = alt.selection_point(fields=["signal"], bind="legend")
+    zoom = alt.selection_interval(bind="scales", encodings=["x"])
+    return (
+        alt.Chart(data, height=height)
+        .mark_line(strokeWidth=1.6)
+        .encode(
+            x=alt.X("time (s):Q"),
+            y=alt.Y("frame SNR (dB):Q", scale=alt.Scale(domain=[lo - 2, hi + 2])),
+            color=alt.Color("signal:N", scale=alt.Scale(domain=names, range=colors),
+                            legend=alt.Legend(orient="top", title=None, labelLimit=400, symbolStrokeWidth=3)),
+            detail="piece:N",
+            opacity=alt.condition(pick, alt.value(1.0), alt.value(0.15)),
+            tooltip=["signal:N", alt.Tooltip("time (s):Q", format=".2f"),
+                     alt.Tooltip("frame SNR (dB):Q", format=".1f")],
+        )
+        .add_params(pick, zoom)
+    )
