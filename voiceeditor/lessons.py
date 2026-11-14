@@ -18,7 +18,7 @@ from scipy.signal import freqz, lfilter, resample_poly, welch
 from .analysis import world_analyze, world_synthesize
 from .audio_io import WORK_FS, load_audio, to_wav_bytes
 from .edits import shift_pitch, warp_formants
-from .metrics import METRICS, SEG_MAX_DB, SEG_MIN_DB, quality, segmental_snr_track
+from .metrics import METRICS, SEG_MAX_DB, SEG_MIN_DB, in_words, quality, segmental_snr_track, verdict
 from .noise import (
     NOISE_TYPES, NOVERLAP, NPERSEG, REMOVE_METHODS, AddNoise, RemoveNoise, make_noise, noise_parts,
     remove_noise, speech_power,
@@ -753,6 +753,26 @@ and see the next lesson to measure it.
 
 
 def lesson_quality():
+    st.info("""
+**In plain words.** Take the clean voice. Everything else in the result is *mess*: noise that is
+still there, plus any damage the cleaning did to the voice. Each SNR answers one question:
+**how many times stronger is the voice than the mess?** Bigger is better.
+
+| Number | Means | Sounds like |
+|---|---|---|
+| below 0 dB | the mess is stronger than the voice | noise wins |
+| 0 to 10 dB | voice 1× to 10× stronger | heavy noise |
+| 10 to 20 dB | voice 10× to 100× stronger | noticeable noise |
+| 20 to 30 dB | voice 100× to 1000× stronger | slight noise |
+| above 30 dB | voice over 1000× stronger | almost clean |
+
+Reading dB: **+3 dB ≈ 2×**, **+10 dB = 10×**, **+20 dB = 100×** (in power). So "+5 dB after
+cleaning" means the mess got about 3× weaker.
+
+**LSD** is the odd one out: it compares the *sound colour* (which frequencies are present), and
+**smaller is better**. Below 2 dB the colour is almost identical, 2–5 dB close, 5–10 dB clearly
+different, above 10 dB very different. These LSD bands are a rough guide, not a standard.
+""", icon=":material/lightbulb:")
     st.markdown("""
 Listening is the final test, but ears disagree and can't be averaged. An **objective quality
 metric** turns "how good is this?" into a number, so methods and settings can be compared fairly.
@@ -825,8 +845,10 @@ methods, read the four numbers together, then listen.
     kind = c1.selectbox("Noise type", NOISE_TYPES, key="L11_kind")
     snr_db = c2.slider("Added noise SNR (dB)", -5, 30, 5, key="L11_snr")
     strength = c3.slider("Removal strength ×", 0.5, 4.0, 1.0, step=0.1, key="L11_strength")
-    rows, tracks, x_clean, sounds = _quality_demo(kind, snr_db, strength)
+    rows, tracks, x_clean, sounds, si_values = _quality_demo(kind, snr_db, strength)
     st.dataframe(rows, hide_index=True, width="stretch")
+    st.markdown("\n".join(f"- **{row['Signal']}** ({verdict('si_sdr', v)[0]}): {in_words('si_sdr', v)}"
+                          for row, v in zip(rows, si_values)))
     st.caption("Segmental SNR, frame by frame (speech frames only). Hover for values, drag to zoom, "
                "click the legend to highlight one.")
     st.altair_chart(quality_track_chart([{"label": label, "db": db, "speech": speech, "color": color}
@@ -856,14 +878,15 @@ def _quality_demo(kind: str, snr_db: float, strength: float):
     signals = {"With added noise": ref + noise}
     for m in REMOVE_METHODS:
         signals[m] = remove_noise(ref + noise, fs, RemoveNoise(True, m, strength))
-    rows = []
+    rows, si_values = [], []
     for label, y in list(signals.items()) + [("Clean speech at half volume", 0.5 * ref)]:
         q = quality(ref, y, fs)
+        si_values.append(q["si_sdr"])
         rows.append({"Signal": label} | {f"{lab} ({u}) {'↑' if hi else '↓'}": "> 99" if q[k] > 99 else f"{q[k]:.1f}"
                                          for k, (lab, u, hi, _) in METRICS.items()})
     colors = [PANEL_COLORS["noisy"], *(METHOD_COLORS[m] for m in REMOVE_METHODS)]
     tracks = {label: (*segmental_snr_track(ref, y), c) for (label, y), c in zip(signals.items(), colors)}
-    return rows, tracks, ref, signals
+    return rows, tracks, ref, signals, si_values
 
 
 def lesson_arabic():

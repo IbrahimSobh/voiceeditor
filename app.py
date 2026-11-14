@@ -23,7 +23,11 @@ from voiceeditor import lessons, plots
 from voiceeditor.analysis import WorldParams, formant_ceiling, formant_tracks, summary, world_analyze, world_synthesize
 from voiceeditor.audio_io import load_audio, normalize, to_wav_bytes
 from voiceeditor.edits import PRESETS, EditSettings, apply_edits
-from voiceeditor.metrics import METRICS, SEG_MAX_DB, SEG_MIN_DB, quality, segmental_snr_track
+from voiceeditor.metrics import (
+    DB_CHEAT_SHEET, METRICS, SEG_MAX_DB, SEG_MIN_DB, change_in_words, in_words, quality, segmental_snr_track,
+    verdict,
+)
+from voiceeditor.metrics import times as as_times    # app.py already uses `times` for frame times
 from voiceeditor.noise import (
     NOISE_TYPES, NOVERLAP, NPERSEG, REMOVE_METHODS, AddNoise, RemoveNoise, noise_parts, remove_noise,
 )
@@ -66,6 +70,8 @@ div[data-testid="stVerticalBlock"] {gap: 0.6rem;}
           font-size: .78rem; white-space: nowrap; color: #dbe4f5;}
 .ve-chip i {font-style: normal; color: #8a97b2;}
 .ve-chip b {color: #22c7f0;}
+.ve-verdict {display: inline-block; border-radius: 999px; padding: .05rem .55rem; font-size: .75rem;
+             font-weight: 650; margin-right: .4rem; border: 1px solid;}
 audio {height: 36px; width: 100%;}
 </style>
 """, unsafe_allow_html=True)
@@ -446,6 +452,41 @@ for col, p in zip(cols, panels):
 SHORT = {"seg_snr": "Seg. SNR"}     # card labels must fit narrow columns
 
 
+VERDICT_COLORS = ["#ff5c5c", "#ff9f2e", "#ffd23f", "#9be36a", "#2ee6a6"]   # level 0 (bad) … 4 (good)
+
+
+def verdict_chip(key: str, value: float) -> str:
+    word, level = verdict(key, value)
+    c = VERDICT_COLORS[level]
+    return f'<span class="ve-verdict" style="color:{c}; border-color:{c}66; background:{c}1a">{word}</span>'
+
+
+def plain_words(report: dict, shown: str) -> None:
+    """The numbers explained for someone who has never seen a dB: one headline, then one line per metric."""
+    q, base = report[shown][0], report["noisy"][0]
+    with st.container(border=True):
+        st.markdown("**In plain words.** The *mess* is everything that isn't the clean voice: leftover noise "
+                    "plus any damage to the voice. Each SNR says how much stronger the voice is than the mess.")
+        if shown == "noisy":
+            head = (f"The added noise leaves the voice **{as_times(q['si_sdr'])} stronger** than the noise: "
+                    f"{verdict('si_sdr', q['si_sdr'])[0]}. Turn on **Remove noise** to see how much each method "
+                    "cleans up.")
+        else:
+            gain = q["si_sdr"] - base["si_sdr"]
+            how = f"**{as_times(gain)} weaker**" if gain >= 0 else f"**{as_times(-gain)} stronger** (worse)"
+            head = (f"**{shown}** made the mess {how} than in the noisy input (SI-SDR {gain:+.1f} dB). "
+                    f"What's left: {verdict('si_sdr', q['si_sdr'])[0]}.")
+        st.markdown(head)
+        lines = []
+        for k, (label, unit, _, _) in METRICS.items():
+            change = "" if shown == "noisy" else " " + change_in_words(k, base[k], q[k])
+            lines.append(f"- {verdict_chip(k, q[k])} **{label} {fmt_db(q[k])} {unit}**: {in_words(k, q[k])}{change}")
+        st.markdown("\n".join(lines), unsafe_allow_html=True)
+        st.caption(DB_CHEAT_SHEET + " Verdicts for the SNRs: below 0 dB noise wins, 0–10 heavy noise, "
+                   "10–20 noticeable, 20–30 slight, above 30 almost clean. LSD: below 2 dB almost identical, "
+                   "2–5 close, 5–10 clearly different, above 10 very different (a rough guide).")
+
+
 def fmt_db(v: float) -> str:
     return "–" if not np.isfinite(v) else "> 99" if v > 99 else f"{v:.1f}"
 
@@ -468,6 +509,7 @@ else:
                 if rem_s.enabled else "With added noise, before any removal")
                + (" · measured before the voice edits: after WORLD rebuilds the voice, the waveform no longer "
                   "lines up sample by sample with the original" if not voice.is_neutral() else ""))
+    plain_words(report, shown)
 
     names = {"noisy": "With added noise"} | {m: m for m in REMOVE_METHODS}
     rows = []
@@ -475,6 +517,7 @@ else:
         row = {"Signal": names[name] + ("  ◀ in use" if rem_s.enabled and name == rem_s.method else "")}
         row |= {f"{lab} ({u}) {'↑' if hi else '↓'}": fmt_db(q[k]) for k, (lab, u, hi, _) in METRICS.items()}
         row["SI-SDR gain (dB)"] = "–" if name == "noisy" else f"{q['si_sdr'] - report['noisy'][0]['si_sdr']:+.1f}"
+        row["In words"] = verdict("si_sdr", q["si_sdr"])[0]
         rows.append(row)
     st.dataframe(rows, hide_index=True, width="stretch")
     colors = {"noisy": PANEL_COLORS["noisy"]} | METHOD_COLORS
@@ -483,7 +526,8 @@ else:
     st.altair_chart(plots.quality_track_chart(tracks, (NPERSEG - NOVERLAP) / fs, SEG_MIN_DB, SEG_MAX_DB),
                     width="stretch")
     st.caption("Frame-by-frame SNR over the speech (32 ms frames, clamped to −10…35 dB); its mean is the "
-               "segmental SNR. Hover for values, drag to zoom, click the legend to highlight one. Both methods use the same Strength, floor and noise-estimate sliders. "
+               "segmental SNR. Hover for values, drag to zoom, click the legend to highlight one. "
+               "Both methods use the same Strength, floor and noise-estimate sliders. "
                "↑ higher is better, ↓ lower is better. Numbers don't replace listening: musical noise can "
                "score well and still sound bad.")
 

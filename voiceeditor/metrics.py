@@ -109,3 +109,69 @@ def quality(ref: np.ndarray, est: np.ndarray, fs: int) -> dict[str, float]:
         "si_sdr": si_sdr(ref, est),
         "lsd": log_spectral_distance(ref, est, fs),
     }
+
+
+# ---------- the numbers in plain words ----------
+#
+# "Mess" = everything in the result that isn't the clean voice: leftover noise plus damage to the voice.
+# dB are turned into "times stronger" (power ratio 10^(dB/10)). The verdict bands follow the SNR
+# lesson (20 dB mildly noisy, 5 dB clearly noisy, 0 dB equal); the LSD bands are a rough guide only.
+
+SNR_BANDS = [  # upper limit (dB), verdict, level 0 (bad) … 4 (good)
+    (0.0, "noise wins", 0),
+    (10.0, "heavy noise", 1),
+    (20.0, "noticeable noise", 2),
+    (30.0, "slight noise", 3),
+    (np.inf, "almost clean", 4),
+]
+LSD_BANDS = [(2.0, "almost identical", 4), (5.0, "close", 3), (10.0, "clearly different", 2),
+             (np.inf, "very different", 0)]
+
+
+def times(db: float) -> str:
+    """A power ratio in dB as words: 13 dB -> "20×"."""
+    r = 10 ** (db / 10)
+    if r >= 1e6:
+        return "over a million times"
+    return f"{r:,.0f}×" if r >= 9.95 else f"{r:.1f}×"
+
+
+def verdict(key: str, value: float) -> tuple[str, int]:
+    """A short verdict for one number, and its level from 0 (bad) to 4 (good)."""
+    for limit, word, level in LSD_BANDS if key == "lsd" else SNR_BANDS:
+        if value < limit:
+            return word, level
+    return SNR_BANDS[-1][1], SNR_BANDS[-1][2]
+
+
+def in_words(key: str, value: float) -> str:
+    """One plain sentence saying what a number means."""
+    if not np.isfinite(value):
+        return "No speech to measure."
+    if key == "lsd":
+        return (f"Look at which frequencies are present, frame by frame: on average each one is {value:.1f} dB "
+                "away from the clean voice. 0 dB would mean the same sound colour.")
+    strength = (f"the voice is **{times(value)} stronger** than the mess" if value >= 0
+                else f"the mess is **{times(-value)} stronger** than the voice")
+    return {
+        "snr": f"Over the whole recording, {strength}.",
+        "seg_snr": f"Checking each short piece of speech (32 ms) on its own, so quiet syllables count too: "
+                   f"typically {strength}.",
+        "si_sdr": f"Like SNR, but the result may be louder or quieter without penalty: {strength}.",
+    }[key]
+
+
+def change_in_words(key: str, before: float, after: float) -> str:
+    """One plain sentence about a change, e.g. from the noisy input to the denoised result."""
+    d = after - before
+    if not np.isfinite(d):
+        return ""
+    if key == "lsd":
+        return (f"{abs(d):.1f} dB {'closer to' if d < 0 else 'further from'} the clean voice's sound colour "
+                f"({'better' if d < 0 else 'worse'}).")
+    return (f"The mess got **{times(d)} weaker** (better)." if d >= 0
+            else f"The mess got **{times(-d)} stronger** (worse).")
+
+
+DB_CHEAT_SHEET = ("Reading dB: +3 dB ≈ 2× stronger · +10 dB = 10× · +20 dB = 100× · 0 dB = equal · "
+                  "negative = the mess is stronger than the voice.")
