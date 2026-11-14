@@ -19,11 +19,10 @@ from matplotlib.figure import Figure
 from scipy.signal import spectrogram
 
 from .analysis import FormantTracks, voiced_at
+from .theme import ENVELOPE_COLOR, F0_COLOR, FORMANT_COLOR, MUTED
 
 SPEC_MAX_HZ = 5000
 F0_AXIS_MAX_HZ = 500
-F0_COLOR = "#ff8c1a"
-FORMANT_COLOR = "#38e0c0"
 CURSOR_COLOR = "#ffffff"
 
 
@@ -68,12 +67,13 @@ def voice_panel(
     x_max: float,
     cursor: Click | None = None,
     size: tuple = (10, 3.6),
+    wave_color: str = MUTED,
 ) -> PanelImage:
     """Waveform (top) and spectrogram (bottom) sharing one time axis."""
     fig = _new_figure(size)
     ax_w, ax_s = fig.subplots(2, 1, sharex=True, gridspec_kw={"height_ratios": [1, 2.6], "hspace": 0.06})
     t = np.arange(x.size) / fs
-    ax_w.plot(t, x, color="#555", linewidth=0.5)
+    ax_w.plot(t, x, color=wave_color, linewidth=0.5)
     ax_w.set_ylim(-1, 1)
     ax_w.set_yticks([])
     ax_w.set_ylabel("wave", fontsize=8)
@@ -92,7 +92,7 @@ def voice_panel(
             ax_s.scatter(formants.times[mask], row[mask], s=4, color=FORMANT_COLOR, linewidths=0)
 
     if cursor is not None:
-        ax_w.axvline(cursor.time, color="#d33", linewidth=1)
+        ax_w.axvline(cursor.time, color="#ff5c5c", linewidth=1)
         ax_s.axvline(cursor.time, color=CURSOR_COLOR, linewidth=1, linestyle="--")
         if cursor.freq is not None:
             ax_s.axhline(cursor.freq, color=CURSOR_COLOR, linewidth=0.8, linestyle=":")
@@ -162,12 +162,12 @@ def spectrum_slice_figure(curves: list[dict], cursor_freq: float | None):
     for ax, c in zip(axes[0], curves):          # one small chart per panel, same dB scale
         ax.plot(c["freqs"], c["db"], color=c["color"], linewidth=0.8)
         if c.get("env_db") is not None:
-            ax.plot(c["env_freqs"], c["env_db"], color="black", linewidth=1.6, alpha=0.7)
+            ax.plot(c["env_freqs"], c["env_db"], color=ENVELOPE_COLOR, linewidth=1.6, alpha=0.8)
         for fval in c.get("formants") or []:
             if np.isfinite(fval):
-                ax.axvline(fval, color="#1a9e75", linewidth=1, linestyle=":")
+                ax.axvline(fval, color=FORMANT_COLOR, linewidth=1, linestyle=":")
         if cursor_freq is not None:
-            ax.axvline(cursor_freq, color="#d33", linewidth=1)
+            ax.axvline(cursor_freq, color="#ff5c5c", linewidth=1)
         ax.set_title(c["label"], fontsize=8, color=c["color"])
         ax.set_xlim(0, SPEC_MAX_HZ)
         ax.set_ylim(top - 80, top + 5)

@@ -23,6 +23,7 @@ from voiceeditor.analysis import WorldParams, formant_ceiling, formant_tracks, s
 from voiceeditor.audio_io import load_audio, normalize, to_wav_bytes
 from voiceeditor.edits import PRESETS, EditSettings, apply_edits
 from voiceeditor.noise import NOISE_TYPES, REMOVE_METHODS, AddNoise, RemoveNoise, add_noise, remove_noise
+from voiceeditor.theme import PANEL_COLORS
 
 SAMPLES = Path(__file__).parent / "samples"
 SLIDERS = {  # key: (label, min, max, step)
@@ -31,26 +32,36 @@ SLIDERS = {  # key: (label, min, max, step)
     "formant": ("Formants ×", 0.8, 1.3, 0.01),
     "speed": ("Speed ×", 0.5, 2.0, 0.05),
 }
-PANEL_COLORS = {"original": "#1f77b4", "noisy": "#8c8c8c", "after": "#d62728"}
 
-st.set_page_config(page_title="Voice editor", page_icon="〰️", layout="wide")
+st.set_page_config(page_title="Voice Editor", page_icon="〰️", layout="wide")
 
 st.markdown("""
 <style>
-.block-container {padding-top: 2.4rem; padding-bottom: 1.5rem; max-width: 1500px;}
-section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"] {padding-top: 1.4rem;}
+@import url('https://fonts.googleapis.com/css2?family=Exo+2:ital,wght@0,700;0,800;1,500&display=swap');
+.block-container {padding-top: 2.2rem; padding-bottom: 1.5rem; max-width: 1500px;}
+section[data-testid="stSidebar"] div[data-testid="stSidebarUserContent"] {padding-top: 1.2rem;}
+section[data-testid="stSidebar"] {border-right: 1px solid #1f2a44;}
 div[data-testid="stVerticalBlock"] {gap: 0.6rem;}
-.ve-title {font-size: 1.45rem; font-weight: 650; margin: 0; line-height: 1.2;}
-.ve-sub {opacity: .6; font-size: .85rem; margin: 0 0 .6rem;}
-.ve-sec {font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; opacity: .6;
-         margin: .9rem 0 .1rem; font-weight: 600;}
-.ve-panel {font-weight: 600; font-size: .95rem; margin: .1rem 0 .15rem; white-space: nowrap;
-            overflow: hidden; text-overflow: ellipsis;}
-.ve-panel span {font-weight: 400; opacity: .65;}
+.ve-brand {display: flex; align-items: center; gap: .9rem; margin-bottom: .9rem;}
+.ve-logo {width: 54px; height: 54px; flex: none; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+          background: linear-gradient(135deg, #22c7f0 0%, #8b6cff 100%); box-shadow: 0 0 18px rgba(34,199,240,.35);}
+.ve-title {font-family: 'Exo 2', sans-serif; font-weight: 800; font-size: 2.1rem !important; letter-spacing: .02em;
+           line-height: 1; margin: 0; color: #f4f7ff;}
+.ve-title span {background: linear-gradient(90deg, #22c7f0, #6fd8ff); -webkit-background-clip: text;
+                background-clip: text; color: transparent;}
+.ve-sub {font-family: 'Exo 2', sans-serif; font-style: italic; font-weight: 500; color: #9fb0d0;
+         font-size: 1rem !important; margin: .3rem 0 0;}
+.ve-sec {font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: #22c7f0;
+         margin: .9rem 0 .1rem; font-weight: 700;}
+.ve-panel {font-weight: 650; font-size: .92rem; margin: .1rem 0 .2rem; padding: .35rem .75rem;
+           border-radius: 8px 8px 0 0; border: 1px solid; border-bottom-width: 3px;
+           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+.ve-panel span {font-weight: 400; opacity: .75;}
 .ve-chips {display: flex; gap: .35rem; justify-content: flex-end;}
-.ve-chip {border: 1px solid rgba(128,128,128,.35); border-radius: 999px; padding: .15rem .6rem;
-          font-size: .78rem; white-space: nowrap;}
-.ve-chip i {font-style: normal; opacity: .6;}
+.ve-chip {border: 1px solid #26324d; background: #111a2e; border-radius: 999px; padding: .2rem .65rem;
+          font-size: .78rem; white-space: nowrap; color: #dbe4f5;}
+.ve-chip i {font-style: normal; color: #8a97b2;}
+.ve-chip b {color: #22c7f0;}
 audio {height: 36px; width: 100%;}
 </style>
 """, unsafe_allow_html=True)
@@ -226,9 +237,13 @@ rem_s = RemoveNoise(rem_on, rem_method, float(rem_strength), rem_floor / 100.0, 
 # ---------- top bar ----------
 
 title_col, view_col = st.columns([3, 1], vertical_alignment="center")
-title_col.markdown('<p class="ve-title">Voice editor</p>'
-                   '<p class="ve-sub">Edit speech with classic signal processing: no AI</p>',
-                   unsafe_allow_html=True)
+title_col.markdown(
+    '<div class="ve-brand"><div class="ve-logo">'
+    '<svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="white" stroke-width="2.4" '
+    'stroke-linecap="round"><path d="M3 14h2M8 9v10M12 5v18M16 9v10M20 11v6M24 14h1"/></svg></div>'
+    '<div><div class="ve-title">VOICE <span>EDITOR</span></div>'
+    '<div class="ve-sub">Classical speech processing · No AI</div></div></div>',
+    unsafe_allow_html=True)
 view = view_col.segmented_control("View", ["Editor", "Learn"], key="view", label_visibility="collapsed") or "Editor"
 
 if view == "Learn":
@@ -326,7 +341,7 @@ def inspect(cursor: plots.Click) -> None:
     st.dataframe(rows, hide_index=True, width="stretch")
     if curves:
         st.pyplot(plots.spectrum_slice_figure(curves, cursor.freq))
-        st.caption("Coloured: harmonics (FFT of a 40 ms frame) · black: WORLD spectral envelope · "
+        st.caption("Coloured: harmonics (FFT of a 40 ms frame) · white: WORLD spectral envelope · "
                    "green dotted: formants F1–F3 · red: clicked frequency")
     for col, (label, seg) in zip(st.columns(len(snippets)), snippets):
         col.caption(f"{label} · 0.5 s")
@@ -377,14 +392,17 @@ for col, p in zip(cols, panels):
     with col:
         detail = f' <span>· {p["detail"]}</span>' if p["detail"] else ""
         full = p["title"] + (f' · {p["detail"]}' if p["detail"] else "")
-        st.markdown(f'<p class="ve-panel" title="{full}">{p["title"]}{detail}</p>', unsafe_allow_html=True)
+        c = PANEL_COLORS[p["name"]]
+        st.markdown(f'<p class="ve-panel" title="{full}" style="color:{c}; border-color:{c}55; '
+                    f'border-bottom-color:{c}; background:{c}1f">{p["title"]}{detail}</p>', unsafe_allow_html=True)
         players = [("Listen", p["x"])] + p["extras"]
         for pc, (label, sig) in zip(st.columns(len(players)), players):
             pc.caption(label)       # every player labelled, so panels side by side line up
             pc.audio(wav(sig, fs), format="audio/wav")
         times = np.arange(len(p["f0"])) * 0.005
         mark = plots.Click(cursor.area, panel_time(cursor, p["name"]), cursor.freq) if cursor else None
-        img = plots.voice_panel(p["x"], fs, p["f0"], times, p["ft"], show_f0, show_fm, x_max, mark, size=size)
+        img = plots.voice_panel(p["x"], fs, p["f0"], times, p["ft"], show_f0, show_fm, x_max, mark, size=size,
+                                wave_color=PANEL_COLORS[p["name"]])
         value = streamlit_image_coordinates(img.pixels, width="stretch", key=f"img_{p['name']}",
                                             png_compression_level=6, cursor="crosshair")
         if value and value.get("unix_time") != st.session_state.get(f"seen_{p['name']}"):

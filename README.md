@@ -1,3 +1,5 @@
+![Voice Editor: classical speech processing, no AI](docs/img/banner.png)
+
 # Voice editor
 
 A personal and teaching tool that edits speech with **classic signal processing, no AI**.
@@ -5,8 +7,6 @@ Load a file, record your voice or pick a sample, then change pitch, pitch range,
 and speed, or add and remove background noise. See every change on waveforms and
 spectrograms, click any moment to inspect it, and learn how it all works in 13 built-in
 lessons ([condensed here](#learn)).
-
-![Editor: original, noisy and denoised + "More female" side by side](docs/img/editor_noise.png)
 
 ## Quick start
 
@@ -73,6 +73,8 @@ while matplotlib builds its font cache.
 
 ### Edit a voice
 
+![Editor: original, noisy, and denoised + "More female", side by side](docs/img/editor_noise.png)
+
 | Control | What it changes |
 |---|---|
 | **Preset** | stored settings: *More female*, *More male*, *Happy*, *Sad* |
@@ -126,7 +128,7 @@ opens describing that exact moment in every panel (Original, With added noise, A
   - *F1, F2, F3*: the first three formants, measured by Praat.
 - **The spectrum at that moment**, one small chart per panel, from a 40 ms slice of sound:
   - the coloured line is the actual spectrum: its regular peaks are the **harmonics** of F0;
-  - the black line is WORLD's **spectral envelope**: the smooth vocal-tract curve along the
+  - the white line is WORLD's **spectral envelope**: the smooth vocal-tract curve along the
     harmonic tops;
   - green dotted lines mark the **formants**, and a red line marks the clicked frequency.
 
@@ -414,7 +416,7 @@ GitHub only plays videos uploaded through its web editor, so new videos must be 
 ```
 
 Rebuilds the screenshots in `docs/img` with a headless Chrome or Edge (a throwaway
-profile, not yours).
+profile, not yours). Then `.venv\Scripts\python make_banner.py` rebuilds the banner from them.
 
 ## How it works
 

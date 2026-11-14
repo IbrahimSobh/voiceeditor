@@ -33,7 +33,7 @@ SHOTS = [  # file name, address query, viewport height, seconds to wait
     ("editor_stacked.png", "sample=sample_female_en.wav&preset=Sad&layout=stacked", 1100, 20),
     ("learn_voice.png", "view=learn&lesson=3", 1450, 15),
     ("learn_formants.png", "view=learn&lesson=7", 1750, 15),
-    ("learn_world.png", "view=learn&lesson=8", 1400, 20),
+    ("learn_world.png", "view=learn&lesson=8", 1950, 20),
 ]
 WIDTH, DEBUG_PORT = 1440, 9333
 

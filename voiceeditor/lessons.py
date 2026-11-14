@@ -19,6 +19,7 @@ from .analysis import world_analyze, world_synthesize
 from .audio_io import WORK_FS, load_audio, to_wav_bytes
 from .edits import shift_pitch, warp_formants
 from .noise import NOISE_TYPES, make_noise, speech_power
+from .theme import MUTED
 
 FS = WORK_FS
 SAMPLE = Path(__file__).resolve().parent.parent / "samples" / "sample_male_en.wav"
@@ -262,9 +263,9 @@ independence**: WORLD separates source from filter so each can be changed alone.
         ax.set_title(title, fontsize=9)
         ax.set_xlim(0, 4000)
     fr, h = resonator_response(formants, BANDWIDTHS)
-    axes[1].plot(fr, h, color="tab:green")
+    axes[1].plot(fr, h, color="#2ee6a6")
     for f in formants:
-        axes[1].axvline(f, color="tab:green", linestyle=":", linewidth=0.8)
+        axes[1].axvline(f, color="#2ee6a6", linestyle=":", linewidth=0.8)
     axes[1].set_title(f"filter: formants {formants[0]}, {formants[1]}, {formants[2]} Hz", fontsize=9)
     axes[1].set_xlim(0, 4000)
     for ax in axes:
@@ -428,8 +429,8 @@ very low (creaky) or very high voices.
     a1.set_title("40 ms frame", fontsize=9)
     a1.set_xlabel("ms", fontsize=8)
     a2.plot(np.arange(r.size) / fs * 1000, r)
-    a2.axvspan(lo / fs * 1000, hi / fs * 1000, color="tab:orange", alpha=0.1, label="search 60–500 Hz")
-    a2.axvline(lag / fs * 1000, color="tab:red", label=f"peak: {lag / fs * 1000:.2f} ms")
+    a2.axvspan(lo / fs * 1000, hi / fs * 1000, color="#ff9f2e", alpha=0.1, label="search 60–500 Hz")
+    a2.axvline(lag / fs * 1000, color="#ff5c5c", label=f"peak: {lag / fs * 1000:.2f} ms")
     a2.legend(fontsize=7)
     a2.set_title("autocorrelation r(τ)", fontsize=9)
     a2.set_xlabel("lag τ (ms)", fontsize=8)
@@ -489,9 +490,9 @@ sampled.
     fig = _fig(10, 3.2)
     a1, a2 = fig.subplots(1, 2)
     for name, (v1, v2, _) in VOWELS.items():
-        a1.scatter(v2, v1, color="gray")
+        a1.scatter(v2, v1, color=MUTED)
         a1.annotate(name.split()[0], (v2, v1), textcoords="offset points", xytext=(5, 3), fontsize=9)
-    a1.scatter([f2], [f1], color="tab:red", s=80, marker="x", label="your vowel")
+    a1.scatter([f2], [f1], color="#ff5c5c", s=80, marker="x", label="your vowel")
     a1.set_xlim(2600, 600)       # phonetics convention: front vowels on the left, close vowels on top
     a1.set_ylim(900, 200)
     a1.set_xlabel("F2 (Hz)  ← front    back →", fontsize=8)
@@ -501,9 +502,9 @@ sampled.
     length = st.slider("Vocal-tract length for the tube model (cm)", 10.0, 20.0, 17.5, step=0.5, key="L7_len")
     tube = [(2 * n - 1) * 350 / (4 * length / 100) for n in (1, 2, 3)]
     fr, h = resonator_response((f1, f2, 2500), BANDWIDTHS)
-    a2.plot(fr, h, color="tab:green", label="your vowel's filter")
+    a2.plot(fr, h, color="#2ee6a6", label="your vowel's filter")
     for i, f in enumerate(tube):
-        a2.axvline(f, color="tab:purple", linestyle="--", linewidth=0.8, label="tube formants" if i == 0 else None)
+        a2.axvline(f, color="#8b6cff", linestyle="--", linewidth=0.8, label="tube formants" if i == 0 else None)
     a2.set_xlim(0, 4000)
     a2.set_xlabel("Hz", fontsize=8)
     a2.set_ylabel("dB", fontsize=8)
@@ -573,7 +574,7 @@ overlap-added into a waveform. Because the three parameters are independent, edi
     freqs = np.linspace(0, fs / 2, sp.shape[1])
     fig = _fig(10, 5.4)
     a1, a2, a3 = fig.subplots(3, 1, sharex=True)
-    a1.plot(t, np.where(f0 > 0, f0, np.nan), color="tab:orange")
+    a1.plot(t, np.where(f0 > 0, f0, np.nan), color="#ff9f2e")
     a1.set_ylabel("F0 (Hz)", fontsize=8)
     a1.set_title("Harvest: F0", fontsize=9)
     keep = freqs <= 5000
@@ -730,7 +731,7 @@ damages more speech: listen to *Removed by noise reduction* in the editor to hea
     a2.plot(g_db, 20 * np.log10(np.maximum(1 - 1 / np.sqrt(gamma), 0.05)), label="spectral subtraction (α = 1)")
     xi = np.maximum(gamma - 1, 0)
     a2.plot(g_db, 20 * np.log10(np.maximum(xi / (1 + xi), 0.05)), label="Wiener")
-    a2.axhline(20 * np.log10(0.05), color="gray", linestyle=":", label="floor 5 %")
+    a2.axhline(20 * np.log10(0.05), color=MUTED, linestyle=":", label="floor 5 %")
     a2.set_xlabel("γ = noisy power / noise power (dB)", fontsize=8)
     a2.set_ylabel("gain (dB)", fontsize=8)
     a2.set_title("how much each method keeps", fontsize=9)
